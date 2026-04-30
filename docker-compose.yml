@@ -1,0 +1,33 @@
+# Wisdom Studio — single-container compose file.
+#
+# Forkers can run the production image directly:
+#   docker compose up                  # build locally and run
+#   docker compose pull && up          # use latest image from GHCR
+#   docker compose up --build          # force a local rebuild
+#
+# For frontend hot-reload during contributor development, run the API and
+# web servers natively instead — see CONTRIBUTING.md.
+
+services:
+  studio:
+    image: ghcr.io/rhatigan-agi/wisdom-studio:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      # Provider keys are optional — the first-run wizard prompts for them
+      # if not set. Pass through whatever you have:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      # Optional: set a Wisdom Layer license key for Pro/Enterprise features.
+      WISDOM_LAYER_LICENSE: ${WISDOM_LAYER_LICENSE:-}
+    volumes:
+      - studio-data:/data
+    restart: unless-stopped
+
+volumes:
+  studio-data:

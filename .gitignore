@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+*.egg
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# uv
+.uv/
+
+# Node
+node_modules/
+.pnpm-store/
+dist/
+.next/
+.vite/
+*.log
+
+# Frontend build outputs
+apps/studio-web/dist/
+apps/studio-web/build/
+
+# Studio runtime data
+.wisdom-studio/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Environment
+.env
+.env.local
+.env.*.local
+studio.json
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# TypeScript build artifacts (defensive — tsconfig sets noEmit, but prevents accidents)
+apps/studio-web/src/**/*.js
+apps/studio-web/src/**/*.js.map
+apps/studio-web/tsconfig.tsbuildinfo
+
+# Internal planning (not for public push)
+_planning/
+
+# Misc
+coverage/
+.coverage
+htmlcov/

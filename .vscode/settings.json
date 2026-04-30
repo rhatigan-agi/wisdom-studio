@@ -1,0 +1,40 @@
+{
+  "files.watcherExclude": {
+    "**/.venv/**": true,
+    "**/node_modules/**": true,
+    "**/.wisdom-studio/**": true,
+    "**/dist/**": true,
+    "**/build/**": true,
+    "**/__pycache__/**": true,
+    "**/.pytest_cache/**": true,
+    "**/.ruff_cache/**": true,
+    "**/.mypy_cache/**": true
+  },
+  "search.exclude": {
+    "**/.venv": true,
+    "**/node_modules": true,
+    "**/.wisdom-studio": true,
+    "**/dist": true,
+    "**/build": true,
+    "**/__pycache__": true
+  },
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/.mypy_cache": true
+  },
+  "python.analysis.exclude": [
+    "**/.venv/**",
+    "**/node_modules/**",
+    "**/.wisdom-studio/**"
+  ],
+  "python.analysis.indexing": false,
+  "python.analysis.useLibraryCodeForTypes": false,
+  "python.analysis.diagnosticMode": "openFilesOnly",
+  "typescript.tsserver.maxTsServerMemory": 4096,
+  "typescript.tsserver.watchOptions": {
+    "excludeDirectories": ["**/.venv", "**/node_modules", "**/.wisdom-studio"]
+  }
+}

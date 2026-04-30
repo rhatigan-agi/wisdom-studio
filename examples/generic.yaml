@@ -1,0 +1,8 @@
+name: Generic Agent
+role: ""
+archetype: balanced
+persona: ""
+directives: []
+llm_provider: anthropic
+llm_tier: mid
+storage_kind: sqlite
