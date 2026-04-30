@@ -17,13 +17,18 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Provider keys are optional — the first-run wizard prompts for them
-      # if not set. Pass through whatever you have:
+      # Provider keys are honored at runtime. Setting any one of them skips
+      # the FirstRun wizard (the deployment reports `initialized=true`) and
+      # the SDK adapter receives the key directly at agent-build time. Values
+      # are never returned by GET /api/config and never written to disk. If
+      # you also save a key through the GUI, the persisted value wins for
+      # that provider — env is a fallback, not an authoritative override.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
-      # Optional: set a Wisdom Layer license key for Pro/Enterprise features.
+      # Optional: Wisdom Layer license key for Pro/Enterprise features. Same
+      # rules — env is the fallback, persisted (if set via GUI) wins.
       WISDOM_LAYER_LICENSE: ${WISDOM_LAYER_LICENSE:-}
     volumes:
       - studio-data:/data

@@ -409,6 +409,214 @@ def test_hide_crud_disables_from_example(tmp_path: Path, monkeypatch: pytest.Mon
         assert response.status_code == 403
 
 
+# --- 2.7a Provider credentials via env ---------------------------------------
+
+
+def test_anthropic_env_key_marks_initialized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`ANTHROPIC_API_KEY` set without a wizard run flips ``initialized=true``.
+
+    This is what `docker-compose.yml` and the Dockerfile have always promised
+    forkers: pass the bare provider key as an env var, skip the GUI setup.
+    Before this, the env var was advertised but silently ignored — only the
+    FirstRun wizard could initialize the deployment.
+    """
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        ANTHROPIC_API_KEY="sk-ant-test",
+    ) as client:
+        body = client.get("/api/config").json()
+        assert body["initialized"] is True
+
+
+def test_env_keys_do_not_leak_into_config_response(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Env-supplied secrets must not appear in ``GET /api/config``.
+
+    The response is consumed by the SPA and may be cached in browser memory.
+    Persisted keys (entered through the wizard) live there by necessity, but
+    env keys belong to the operator's deployment surface and have no business
+    flowing to the client.
+    """
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        ANTHROPIC_API_KEY="sk-ant-secret",
+        OPENAI_API_KEY="sk-openai-secret",
+        WISDOM_LAYER_LICENSE="wl_pro_secret",
+    ) as client:
+        body = client.get("/api/config").json()
+        assert body["provider_keys"] == {}
+        assert body["license_key"] is None
+
+
+def test_env_keys_not_persisted_to_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Booting with env keys must NOT write studio.json.
+
+    The persistence file is reserved for user-set values from the wizard. An
+    env-only deployment should leave it absent so future env rotations take
+    effect without a stale persisted override.
+    """
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        ANTHROPIC_API_KEY="sk-ant-test",
+    ):
+        config_path = tmp_path / "studio.json"
+        assert not config_path.exists()
+
+
+def test_persisted_provider_key_overrides_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A wizard-saved key wins over the env var for the same provider.
+
+    Self-hosters can still override an env default through the GUI. The env
+    serves as a deployment-level fallback, not an authoritative override.
+    """
+    # Pre-seed studio.json as if the wizard ran with a different anthropic key.
+    config_path = tmp_path / "studio.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "license_key": None,
+                "provider_keys": {"anthropic": "sk-from-wizard"},
+                "initialized": True,
+            }
+        )
+    )
+
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        ANTHROPIC_API_KEY="sk-from-env",
+    ) as _client:
+        # Resolve the provider key the way SessionManager does.
+        import studio_api.sessions as sessions_module
+
+        resolved = sessions_module.SessionManager._resolve_provider_key(
+            {"anthropic": "sk-from-wizard"}, "anthropic"
+        )
+        assert resolved == "sk-from-wizard"
+
+
+def test_env_provider_key_is_used_when_persisted_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no wizard run, ``_resolve_provider_key`` falls back to env."""
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        ANTHROPIC_API_KEY="sk-from-env",
+    ):
+        import studio_api.sessions as sessions_module
+
+        resolved = sessions_module.SessionManager._resolve_provider_key({}, "anthropic")
+        assert resolved == "sk-from-env"
+
+
+def test_no_env_keys_keeps_uninitialized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sanity: absence of env keys leaves ``initialized=false`` (FirstRun shows)."""
+    with _boot_studio(tmp_path, monkeypatch) as client:
+        body = client.get("/api/config").json()
+        assert body["initialized"] is False
+
+
+def test_blank_env_key_treated_as_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``ANTHROPIC_API_KEY=`` (empty) must not flip ``initialized`` to true.
+
+    Forkers commonly pass through the env var unconditionally
+    (``-e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY``); when the host shell has it
+    unset, Docker forwards an empty string. Treat that as absent so the
+    wizard still appears.
+    """
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        ANTHROPIC_API_KEY="",
+    ) as client:
+        body = client.get("/api/config").json()
+        assert body["initialized"] is False
+
+
+def test_wisdom_layer_license_env_passes_to_agent_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``WISDOM_LAYER_LICENSE`` env propagates to ``build_agent`` when no
+    persisted license exists.
+
+    Stubs ``build_agent`` to capture the license_key argument; we don't need a
+    real LLM to verify the wiring. Persisted license (if any) wins, but here
+    studio.json is absent so the env value is what the SDK should see.
+    """
+    monkeypatch.setenv("WISDOM_LAYER_LICENSE", "wl_pro_envtest")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    with _boot_studio(tmp_path, monkeypatch) as client:
+        # Create an agent so a session can be opened against it.
+        create = client.post(
+            "/api/agents",
+            json={
+                "name": "Licensed",
+                "archetype": "balanced",
+                "llm_provider": "anthropic",
+            },
+        )
+        assert create.status_code == 201, create.text
+        agent_id = create.json()["agent_id"]
+
+    captured: dict[str, object] = {}
+
+    class _FakeAgent:
+        def __init__(self, agent_id: str) -> None:
+            self.agent_id = agent_id
+
+        async def initialize(self) -> None:
+            return None
+
+        def on(self, _name: str, _handler: object) -> object:
+            return object()
+
+        def off(self, _token: object) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    def _fake_build_agent(detail, *, provider_api_key, license_key):  # type: ignore[no-untyped-def]
+        captured["provider_api_key"] = provider_api_key
+        captured["license_key"] = license_key
+        return _FakeAgent(detail.agent_id)
+
+    import studio_api.sessions as sessions_module
+
+    monkeypatch.setattr(sessions_module, "build_agent", _fake_build_agent)
+
+    import asyncio
+
+    async def _open_session() -> None:
+        await sessions_module.session_manager.get_or_create(agent_id)
+
+    # The session_manager singleton needs the parent app attached. Reuse the
+    # most recent main module import from `_boot_studio`.
+    import studio_api.main as main_module
+
+    sessions_module.session_manager.attach(main_module.app)
+    asyncio.run(_open_session())
+
+    assert captured["provider_api_key"] == "sk-ant-test"
+    assert captured["license_key"] == "wl_pro_envtest"
+
+
 # --- 2.7 Docs URL ------------------------------------------------------------
 
 

@@ -20,9 +20,17 @@ from wisdom_layer.dashboard.ws_hub import WebSocketHub
 from studio_api.schemas import AgentDetail, LLMProvider
 from studio_api.sdk_factory import build_agent
 from studio_api.sdk_mount import build_sdk_subapp
+from studio_api.settings import settings
 from studio_api.store import get_agent, load_studio_config, touch_agent
 
 logger = logging.getLogger(__name__)
+
+_ENV_VAR_FOR_PROVIDER: dict[LLMProvider, str] = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "litellm": "LITELLM_API_KEY",
+}
 
 
 @dataclass
@@ -65,11 +73,14 @@ class SessionManager:
             provider_key = self._resolve_provider_key(
                 studio_config.provider_keys, detail.llm_provider
             )
+            # Persisted license wins; env is the fallback for cloud/Docker
+            # deployments that never run the FirstRun wizard.
+            license_key = studio_config.license_key or settings.wisdom_layer_license
 
             agent = build_agent(
                 detail,
                 provider_api_key=provider_key,
-                license_key=studio_config.license_key,
+                license_key=license_key,
             )
             await agent.initialize()
 
@@ -136,11 +147,20 @@ class SessionManager:
 
     @staticmethod
     def _resolve_provider_key(keys: dict[LLMProvider, str], provider: LLMProvider) -> str:
-        key = keys.get(provider, "")
+        """Return the provider's API key, preferring persisted over env.
+
+        Persisted keys come from the FirstRun wizard / Settings page (saved to
+        ``studio.json``). Env keys come from ``ANTHROPIC_API_KEY`` etc. and
+        are the fallback path used by Docker / Fly / cloud deploys that never
+        run the wizard. Persisted wins so a self-hoster can override an env
+        default through the GUI.
+        """
+        key = keys.get(provider, "") or settings.env_provider_keys.get(provider, "")
         if not key and provider != "ollama":
             raise RuntimeError(
                 f"No API key configured for provider {provider!r}. "
-                "Set it from the Studio Settings page or in .env."
+                "Set it from the Studio Settings page, the matching env var "
+                f"({_ENV_VAR_FOR_PROVIDER.get(provider, '<env>')}), or .env."
             )
         return key
 

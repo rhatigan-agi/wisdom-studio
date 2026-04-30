@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import get_args
 
 import bleach
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from studio_api.schemas import LLMProvider, LockedLLM
@@ -75,6 +75,35 @@ class StudioSettings(BaseSettings):
     # empty string to suppress the CTA entirely.
     signup_url: str | None = Field(default="https://wisdomlayer.ai/signup/")
 
+    # --- Provider credentials (env-only, never persisted) --------------------
+    #
+    # These honor the bare `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / etc. names
+    # advertised by `docker-compose.yml`, the Dockerfile, and `.env.example`.
+    # When set, they:
+    #   1. Skip the FirstRun wizard (the API reports `initialized=true`).
+    #   2. Are merged into the SDK adapter at agent-build time (in
+    #      ``sessions._resolve_provider_key``), with persisted UI-set keys
+    #      taking precedence so a self-hoster can override env via the GUI.
+    #
+    # They are NOT returned in ``GET /api/config`` — the response carries only
+    # persisted keys, so an env-supplied secret never leaks through the
+    # transport surface or into client memory.
+    anthropic_api_key: str | None = Field(
+        default=None, validation_alias=AliasChoices("ANTHROPIC_API_KEY")
+    )
+    openai_api_key: str | None = Field(
+        default=None, validation_alias=AliasChoices("OPENAI_API_KEY")
+    )
+    gemini_api_key: str | None = Field(
+        default=None, validation_alias=AliasChoices("GEMINI_API_KEY")
+    )
+    litellm_api_key: str | None = Field(
+        default=None, validation_alias=AliasChoices("LITELLM_API_KEY")
+    )
+    wisdom_layer_license: str | None = Field(
+        default=None, validation_alias=AliasChoices("WISDOM_LAYER_LICENSE")
+    )
+
     @field_validator("signup_url", "docs_url")
     @classmethod
     def _empty_string_is_none(cls, value: str | None) -> str | None:
@@ -113,6 +142,23 @@ class StudioSettings(BaseSettings):
     @property
     def config_path(self) -> Path:
         return self.data_dir / "studio.json"
+
+    @property
+    def env_provider_keys(self) -> dict[LLMProvider, str]:
+        """Sparse map of provider → key for env-supplied credentials.
+
+        Empty strings are dropped so a deliberately-blank ``ANTHROPIC_API_KEY=``
+        is treated as "unset" (matching the
+        ``WISDOM_STUDIO_SIGNUP_URL=`` convention elsewhere). Ollama is never
+        included — its adapter resolves its own URL from the SDK env.
+        """
+        candidates: dict[LLMProvider, str | None] = {
+            "anthropic": self.anthropic_api_key,
+            "openai": self.openai_api_key,
+            "gemini": self.gemini_api_key,
+            "litellm": self.litellm_api_key,
+        }
+        return {p: v for p, v in candidates.items() if v and v.strip()}
 
     @property
     def locked_llm(self) -> LockedLLM | None:

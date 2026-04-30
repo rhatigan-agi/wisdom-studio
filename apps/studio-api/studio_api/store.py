@@ -49,6 +49,17 @@ def _runtime_overlay() -> dict[str, object]:
     }
 
 
+def _env_initializes() -> bool:
+    """True when env-supplied credentials are sufficient to skip FirstRun.
+
+    Any provider key OR a license key counts. Provider keys alone are enough
+    because the wizard's only required field is a provider key; license is
+    optional. We don't require both — operators who only set the license
+    (and rely on the GUI for the provider key) still see the wizard.
+    """
+    return bool(settings.env_provider_keys)
+
+
 def load_studio_config() -> StudioConfig:
     _ensure_dirs()
     path = settings.config_path
@@ -56,7 +67,14 @@ def load_studio_config() -> StudioConfig:
     if path.exists():
         raw = json.loads(path.read_text(encoding="utf-8"))
         persisted = {k: raw.get(k) for k in _PERSISTED_FIELDS if k in raw}
-    return StudioConfig.model_validate({**persisted, **_runtime_overlay()})
+    overlay = _runtime_overlay()
+    config = StudioConfig.model_validate({**persisted, **overlay})
+    # Env-supplied provider keys flip `initialized` so the SPA bypasses the
+    # FirstRun wizard. The keys themselves stay out of the response — the
+    # session manager pulls them directly from settings at agent-build time.
+    if not config.initialized and _env_initializes():
+        config.initialized = True
+    return config
 
 
 def save_studio_config(config: StudioConfig) -> None:

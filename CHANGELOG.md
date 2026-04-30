@@ -7,7 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.6.1] - 2026-04-30
+### Fixed
+
+- **Provider-key and license env vars are now actually honored.**
+  `docker-compose.yml`, the Dockerfile, and `.env.example` have always
+  advertised that `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,
+  `LITELLM_API_KEY`, and `WISDOM_LAYER_LICENSE` could be passed as bare env
+  vars to skip the FirstRun wizard. The backend never read them — the keys
+  were only consumable through the GUI. Cloud and Docker deploys (Fly,
+  Railway, headless boxes) hit the wizard despite a fully-provisioned
+  environment.
+
+  Studio now reads these env vars at startup. Setting any provider key flips
+  `GET /api/config` → `initialized=true` so the SPA bypasses the wizard, and
+  `SessionManager._resolve_provider_key` falls back to env when no persisted
+  value exists for the requested provider. Persisted keys (saved through the
+  GUI) still win over env so a self-hoster can override an env default
+  through the Settings page. Env-supplied secrets are never returned in
+  `GET /api/config` and never written to `studio.json`.
+
+  No code change is required for forks that were already setting these env
+  vars — the behavior matches what the docs always promised.
 
 ### Fixed
 

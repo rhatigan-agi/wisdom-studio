@@ -4,8 +4,10 @@
 #
 # One container, port 3000 serves the SPA AND the API. SQLite data lives in
 # /data (mount a volume to persist). Provider API keys are accepted via env
-# (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, OLLAMA_BASE_URL) or
-# entered through the first-run wizard in the GUI.
+# (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, LITELLM_API_KEY,
+# OLLAMA_BASE_URL) or entered through the first-run wizard in the GUI;
+# setting any one of them skips the wizard. WISDOM_LAYER_LICENSE is honored
+# the same way for the (optional) Pro/Enterprise license key.
 #
 # Build:   docker build -t wisdom-studio .
 # Run:     docker run -p 3000:3000 -v studio-data:/data \
