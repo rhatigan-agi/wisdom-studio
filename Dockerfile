@@ -44,6 +44,12 @@ WORKDIR /app
 COPY README.md /README.md
 COPY apps/studio-api/pyproject.toml apps/studio-api/uv.lock ./
 COPY apps/studio-api/studio_api ./studio_api
+
+# Install CPU-only torch from PyTorch's CPU index first. The default torch
+# wheel pulls ~800MB of CUDA runtime that no Studio deployment uses; the CPU
+# wheel is ~200MB. Pinning torch first means the subsequent install sees
+# torch as already satisfied and won't pull the GPU build.
+RUN uv pip install --system --no-cache torch --index-url https://download.pytorch.org/whl/cpu
 RUN uv pip install --system --no-cache '.[all-adapters]'
 
 

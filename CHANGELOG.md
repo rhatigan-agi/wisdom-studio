@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-04-30
+
+### Fixed
+
+- **Docker image build time and reliability**. The production image now
+  installs the CPU-only PyTorch wheel from `download.pytorch.org/whl/cpu`
+  before resolving the rest of the install graph, dropping torch from
+  ~800MB to ~200MB on disk. No Studio deployment uses the CUDA runtime,
+  and SDK runtime behavior is unchanged. Significantly reduces image
+  size and shaves minutes off cold builds.
+- **`release.yml`**: dropped `linux/arm64` from the GHCR publish. arm64
+  was being built under QEMU emulation on x86 runners (3-5× slower) and
+  pushing builds past 20 minutes with no native consumer of the arm64
+  image. amd64-only for now; native arm64 can be added later via a
+  matrix on `runs-on: ubuntu-24.04-arm`.
+- **`ci.yml`**: collapsed `astral-sh/setup-uv` + `uv python install 3.12`
+  into a single step using `setup-uv`'s built-in `python-version` input,
+  removing one source of intermittent 502 failures from the
+  `python-build-standalone` release CDN.
+
+### Note
+
+- v0.6.0 was tagged but its release workflow failed before publishing
+  to GHCR (multi-arch QEMU build timed out, then a transient 502 from
+  the standalone Python CDN failed CI). v0.6.1 is the first release
+  that actually publishes a working image.
+
 ## [0.6.0] - 2026-04-30
 
 ### Added
@@ -98,6 +125,7 @@ Initial public release. Apache-2.0.
   (per-user persistence) so a single image can serve many bind-mounted data
   directories without rebuilding.
 
-[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/rhatigan-agi/wisdom-studio/releases/tag/v0.5.0
