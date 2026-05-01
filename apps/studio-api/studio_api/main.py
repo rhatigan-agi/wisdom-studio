@@ -57,14 +57,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     if settings.seed_path is not None:
-        spec = load_seed(settings.seed_path)
+        resolved = settings.seed_path_resolved
+        assert resolved is not None  # guarded by the outer `is not None`
+        spec = load_seed(resolved, configured=settings.seed_path)
         if spec is not None:
             try:
                 await apply_seed(spec)
             except Exception as exc:  # noqa: BLE001 — never block startup on seed
                 logger.warning(
                     "studio.seed.apply_failed",
-                    extra={"seed_path": str(settings.seed_path), "error": str(exc)},
+                    extra={"seed_path": str(resolved), "error": str(exc)},
                 )
 
     yield
@@ -255,6 +257,79 @@ async def post_agent_from_example(slug: str) -> AgentDetail:
     return create_agent(spec)
 
 
+# --- Chat disclosure helpers -------------------------------------------------
+
+
+_MEMORY_SNIPPET_MAX = 240
+_MEMORY_DISCLOSURE_LIMIT = 5
+_DIRECTIVE_DISCLOSURE_LIMIT = 10
+
+
+def _short_memory_snippet(memory: dict[str, object]) -> str:
+    """Extract a one-line, length-bounded snippet from a memory dict.
+
+    SDK memory rows surface a ``content`` dict (varying schema by ``kind``).
+    We try the most informative shapes first and fall back to a JSON dump.
+    """
+    raw_content = memory.get("content")
+    text = ""
+    if isinstance(raw_content, dict):
+        if isinstance(raw_content.get("text"), str):
+            text = str(raw_content["text"])
+        elif isinstance(raw_content.get("role"), str) and isinstance(raw_content.get("text"), str):
+            text = f"{raw_content['role']}: {raw_content['text']}"
+        else:
+            text = ", ".join(f"{k}={v}" for k, v in raw_content.items())
+    elif isinstance(raw_content, str):
+        text = raw_content
+    text = text.strip()
+    if len(text) > _MEMORY_SNIPPET_MAX:
+        text = text[: _MEMORY_SNIPPET_MAX - 1].rstrip() + "…"
+    return text
+
+
+async def _gather_memory_snippets(agent: object, query: str) -> list[str]:
+    """Return short snippets of the memories most relevant to ``query``.
+
+    Failures are logged and swallowed — disclosure is best-effort.
+    """
+    try:
+        memories = await agent.memory.search(query, limit=_MEMORY_DISCLOSURE_LIMIT)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 — logged, swallowed; chat must still complete
+        logger.debug("studio.chat.memory_disclosure_failed", exc_info=True)
+        return []
+    snippets: list[str] = []
+    for mem in memories:
+        if not isinstance(mem, dict):
+            continue
+        snippet = _short_memory_snippet(mem)
+        if snippet:
+            snippets.append(snippet)
+    return snippets
+
+
+async def _gather_directive_snippets(agent: object) -> list[str]:
+    """Return the active directive texts the agent's runtime would apply.
+
+    Mirrors the SDK Compare endpoint's behavior so Studio's two chat surfaces
+    stay consistent. Failures are logged and swallowed.
+    """
+    try:
+        directives = await agent.directives.active()  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001
+        logger.debug("studio.chat.directive_disclosure_failed", exc_info=True)
+        return []
+    out: list[str] = []
+    for entry in directives[:_DIRECTIVE_DISCLOSURE_LIMIT]:
+        if isinstance(entry, dict):
+            text = entry.get("text") or entry.get("content")
+            if isinstance(text, str) and text.strip():
+                out.append(text.strip())
+        elif isinstance(entry, str) and entry.strip():
+            out.append(entry.strip())
+    return out
+
+
 # --- Session state (kiosk / ephemeral) ---------------------------------------
 
 
@@ -320,11 +395,31 @@ async def chat(agent_id: str, request: ChatRequest) -> Response:
                 {"role": "user", "text": request.message},
             )
 
+        # Thread the SPA-tracked prior turns into the SDK's layer-4 context.
+        # The SDK only auto-threads memory (semantic), not chronological
+        # history, so without this each turn is treated as standalone and
+        # the agent can't resolve pronouns ("track them down" → "who is
+        # them?"). Map the wire format ({role, content}) to plain dicts;
+        # the SDK reads dict.get("role") / dict.get("content").
+        session_context = (
+            [{"role": m.role, "content": m.content} for m in request.prior_messages]
+            if request.prior_messages
+            else None
+        )
+
         result = await respond_loop(
             session.agent,
             request.message,
             hard_constraints=session.detail.persona,
+            session_context=session_context,
         )
+
+        # Re-run the searches respond_loop did internally so the SPA can
+        # show "what informed this answer" without depending on SDK-internal
+        # state. Disclosure is a transparency affordance — failures here are
+        # logged and swallowed so the chat itself still completes.
+        memory_snippets = await _gather_memory_snippets(session.agent, request.message)
+        directive_snippets = await _gather_directive_snippets(session.agent)
 
         if request.capture:
             await session.agent.memory.capture(
@@ -345,6 +440,8 @@ async def chat(agent_id: str, request: ChatRequest) -> Response:
                 composed_chars=result.composed_chars,
                 truncated_layers=result.truncated_layers,
                 snapshot_id=result.snapshot_id,
+                memories_used_snippets=memory_snippets,
+                directives_used=directive_snippets,
             ).model_dump()
         )
 
@@ -358,12 +455,26 @@ async def cognition_socket(websocket: WebSocket, agent_id: str) -> None:
 
     Messages arrive as JSON arrays of ``{"type", "timestamp", "data"}`` events
     (the SDK hub batches events on a 100 ms flush interval).
+
+    Any failure during session boot (missing provider key, license init
+    failure, SDK adapter import error) is caught and reported as a clean
+    application close code with a human-readable reason. Without this,
+    uncaught exceptions surface to the client as an opaque "WebSocket
+    connection failed" with no diagnostic, leaving forkers stuck.
     """
     try:
         session = await session_manager.get_or_create(agent_id)
     except KeyError:
         await websocket.accept()
         await websocket.close(code=4404, reason=f"agent not found: {agent_id}")
+        return
+    except Exception as exc:  # noqa: BLE001 — surface every boot failure
+        logger.exception("studio.ws.session_boot_failed", extra={"agent_id": agent_id})
+        await websocket.accept()
+        # WS close-reason is capped at 123 bytes; truncate the message so we
+        # never produce an invalid frame.
+        reason = f"session boot failed: {exc}"[:120]
+        await websocket.close(code=4500, reason=reason)
         return
 
     # First WS connect anchors the session-TTL clock. ``mark_started`` is

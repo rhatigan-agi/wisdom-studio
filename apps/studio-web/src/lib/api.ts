@@ -5,6 +5,7 @@ import type {
   ChatCompareMode,
   ChatCompareRequest,
   ChatCompareResponse,
+  ChatMessage,
   ChatRequest,
   ChatResponse,
   ExampleSummary,
@@ -151,10 +152,19 @@ export const api = {
     request(`${studio}/agents/from-example/${slug}`, { method: "POST" }),
 
   // Studio-owned chat endpoint — thin wrapper around SDK respond_loop().
-  chat: (id: string, message: string): Promise<ChatResponse> =>
+  // `priorMessages` is the recent in-SPA chat history; the backend forwards
+  // it as `session_context` so the agent can thread follow-ups across turns.
+  chat: (
+    id: string,
+    message: string,
+    priorMessages: ChatMessage[] = [],
+  ): Promise<ChatResponse> =>
     request(`${studio}/agents/${id}/chat`, {
       method: "POST",
-      body: JSON.stringify({ message } satisfies ChatRequest),
+      body: JSON.stringify({
+        message,
+        prior_messages: priorMessages.length ? priorMessages : undefined,
+      } satisfies ChatRequest),
     }),
 
   // SDK dashboard's compare endpoint — answers the same question across

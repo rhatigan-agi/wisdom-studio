@@ -87,7 +87,6 @@ sudo sysctl --system
 - One concern per PR.
 - Include the SDK version you tested against.
 - If you touched the cognition stream, list which event names you wired.
-- Run validation before pushing:
-  - `cd apps/studio-web && pnpm typecheck && pnpm lint && pnpm test`
-  - `cd apps/studio-api && uv run ruff check . && uv run pytest`
-  - Smoke test: `docker-compose up`, walk wizard → chat → confirm cognition events land in the sidebar.
+- Run validation before pushing (from the repo root):
+  - `make typecheck lint test`
+  - Smoke test: `make docker && make docker-run`, walk wizard → chat → confirm cognition events land in the sidebar.

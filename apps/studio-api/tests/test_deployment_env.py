@@ -138,6 +138,44 @@ def test_seed_missing_file_returns_none(tmp_path: Path) -> None:
     assert load_seed(tmp_path / "nope.json") is None
 
 
+def test_seed_path_relative_resolves_from_repo_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A relative ``seed_path`` resolves against the repo root (= Docker WORKDIR /app).
+
+    This is the contract that lets a forker write
+    ``WISDOM_STUDIO_SEED_PATH=examples/seeds/researcher.json`` once and have
+    it work both in ``make dev`` (cwd = apps/studio-api) and in the published
+    container (WORKDIR /app). The previous behavior — pass straight through
+    to pydantic ``Path`` — required either an absolute path (Docker-only) or
+    knowing the dev-server cwd, both forker-hostile.
+    """
+    monkeypatch.setenv("WISDOM_STUDIO_SEED_PATH", "examples/seeds/researcher.json")
+
+    import studio_api.settings as settings_module
+
+    importlib.reload(settings_module)
+
+    resolved = settings_module.settings.seed_path_resolved
+    assert resolved is not None
+    assert resolved.is_absolute()
+    # Repo root is parents[3] from settings.py — same on host and in Docker.
+    expected_root = Path(settings_module.__file__).resolve().parents[3]
+    assert resolved == expected_root / "examples" / "seeds" / "researcher.json"
+
+
+def test_seed_path_absolute_passes_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An absolute ``seed_path`` is returned untouched — the operator's call wins."""
+    explicit = tmp_path / "ops" / "custom-seed.json"
+    monkeypatch.setenv("WISDOM_STUDIO_SEED_PATH", str(explicit))
+
+    import studio_api.settings as settings_module
+
+    importlib.reload(settings_module)
+
+    assert settings_module.settings.seed_path_resolved == explicit
+
+
 def test_seed_creates_agent_and_memories(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Activity, Database, Sparkles, Send, Trash, Trash2, Lock, X, PanelRightOpen, Layers } from "lucide-react";
+import { Activity, ChevronDown, ChevronRight, Database, Sparkles, Send, Trash, Trash2, Lock, X, PanelRightOpen, Layers } from "lucide-react";
 import { SessionStateError, TierError, api } from "../lib/api";
 import { useStudio } from "../lib/store";
 import { SESSION_EXPIRED_EVENT } from "../components/kiosk/SessionTimer";
 import { SessionEndedView } from "../components/kiosk/SessionEndedView";
+import { ChatMarkdown } from "../components/ChatMarkdown";
+import { MemoryMapOverlay } from "../components/MemoryMapOverlay";
+import { useMemoryMap } from "../components/useMemoryMap";
 import type {
   AgentDetail as AgentDetailType,
   ChatCompareResponse,
+  ChatMessage,
   CognitionEvent,
 } from "../types/api";
 
@@ -24,16 +28,60 @@ interface MemorySearchHit {
 
 // Discriminated union: a single chat row is either a user/agent text line
 // or a compare-mode card carrying three side-by-side answers from the SDK's
-// /api/chat endpoint.
+// /api/chat endpoint. Agent lines optionally carry an `informed` snapshot
+// (memories + directives the response was grounded in) for the per-message
+// "What informed this?" disclosure.
+interface InformedBy {
+  memories: string[];
+  directives: string[];
+}
+
 type ChatLine =
   | { role: "user"; text: string; ts: string }
-  | { role: "agent"; text: string; ts: string }
+  | { role: "agent"; text: string; ts: string; informed?: InformedBy }
   | { role: "compare"; question: string; result: ChatCompareResponse; ts: string };
 
 // Stable empty array for the cognition fallback. `useStudio((s) => x ?? [])`
 // returns a new `[]` per call when `x` is undefined; Object.is then reports
 // the selector value as changed every render, defeating zustand's bail-out.
 const EMPTY_COGNITION: readonly CognitionEvent[] = Object.freeze([]);
+
+// One-shot dream-button onboarding hint. Stored as a single boolean flag.
+// Persistent installs use localStorage so a returning user isn't prompted
+// again; ephemeral demos use sessionStorage so the next visitor (different
+// tab, same browser) still sees the hint.
+const DREAM_HINT_KEY = "wisdom-studio:dream-hint-seen";
+
+function dreamHintStorage(ephemeral: boolean): Storage | null {
+  // Privacy-mode browsers can throw on storage access; treat that as "no
+  // persistence" (the hint will re-show next session, harmless).
+  try {
+    return ephemeral ? window.sessionStorage : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function readDreamHintFlag(ephemeral: boolean): boolean {
+  const store = dreamHintStorage(ephemeral);
+  if (!store) return false;
+  try {
+    return store.getItem(DREAM_HINT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeDreamHintFlag(ephemeral: boolean): void {
+  const store = dreamHintStorage(ephemeral);
+  if (!store) return;
+  try {
+    store.setItem(DREAM_HINT_KEY, "1");
+  } catch {
+    // Storage quota / private mode — silently no-op. The hint will re-show
+    // on next mount, which is acceptable for a low-stakes onboarding nudge.
+  }
+}
 
 type WsState = "idle" | "connecting" | "live" | "closed";
 
@@ -62,12 +110,21 @@ export function AgentDetail(): JSX.Element {
   const [memoriesLoading, setMemoriesLoading] = useState(false);
   const [memoriesError, setMemoriesError] = useState<string | null>(null);
   const [tierError, setTierError] = useState<TierError | null>(null);
+
   // Mobile-only: side pane is hidden by default and revealed via the
   // floating action button in the chat column. Desktop ignores this state
   // because the lg-breakpoint grid renders both columns side-by-side.
   const [paneOpen, setPaneOpen] = useState(false);
 
   const [wsState, setWsState] = useState<WsState>("idle");
+
+  // Memory map: dedup'd union of seed-probe results and live captures from
+  // the cognition stream. Rendered as a floating bottom-right overlay
+  // (MemoryMapOverlay) independent of the side pane. Wait until the WS
+  // reports `live` before probing the SDK memory route — the per-agent
+  // sub-app is mounted lazily by SessionManager and probing it earlier
+  // 404s.
+  const mapNodes = useMemoryMap(agentId, cognition, wsState === "live");
 
   // Server-confirmed session lifecycle. Polled when the deployment configures
   // a TTL or token cap; otherwise stays null and the surface renders normally.
@@ -80,6 +137,22 @@ export function AgentDetail(): JSX.Element {
   const sessionGated = sessionTtl !== null || tokenCap !== null;
   const setSessionState = useStudio((s) => s.setSessionState);
   const sessionStateName = useStudio((s) => s.sessionState?.state ?? "active");
+  const ephemeral = useStudio((s) => s.config?.ephemeral ?? false);
+
+  // One-shot dream-button hint. Surfaces after the visitor has sent two
+  // messages, then never again on this browser/tab. Persistent installs use
+  // localStorage (don't re-prompt across tabs); ephemeral demos use
+  // sessionStorage so a fresh visitor in the same browser still sees it.
+  const [dreamHintDismissed, setDreamHintDismissed] = useState<boolean>(() =>
+    readDreamHintFlag(ephemeral),
+  );
+  const dismissDreamHint = (): void => {
+    setDreamHintDismissed(true);
+    writeDreamHintFlag(ephemeral);
+  };
+  const userMessageCount = chat.filter((l) => l.role === "user").length;
+  const showDreamHint =
+    !dreamHintDismissed && userMessageCount >= 2 && !dreaming && sessionStateName === "active";
 
   useEffect(() => {
     if (!agentId || !sessionGated) {
@@ -143,6 +216,14 @@ export function AgentDetail(): JSX.Element {
   // re-renders. SDK WebSocketHub batches events on a 100 ms flush interval
   // and sends them as a JSON array per message; each event has shape
   // `{type, timestamp, data}`.
+  //
+  // React 18 StrictMode runs effect → cleanup → effect on every mount in
+  // dev. The first cleanup closes a still-CONNECTING socket, which the
+  // browser surfaces as an "error" event AND a "close" event. We must
+  // suppress both on the cleaned-up socket, otherwise the stale error/close
+  // can race the second socket's `open` and clobber wsState back to
+  // "closed" — which then keeps the cognition pane and the memory-map seed
+  // probe (which gates on `wsState === "live"`) permanently dark.
   useEffect(() => {
     if (!agentId) return;
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
@@ -150,12 +231,20 @@ export function AgentDetail(): JSX.Element {
     let closedByCleanup = false;
     setWsState("connecting");
     const ws = new WebSocket(url);
-    ws.onopen = (): void => setWsState("live");
-    ws.onclose = (): void => {
-      if (!closedByCleanup) setWsState("closed");
+    ws.onopen = (): void => {
+      if (closedByCleanup) return;
+      setWsState("live");
     };
-    ws.onerror = (): void => setWsState("closed");
+    ws.onclose = (): void => {
+      if (closedByCleanup) return;
+      setWsState("closed");
+    };
+    ws.onerror = (): void => {
+      if (closedByCleanup) return;
+      setWsState("closed");
+    };
     ws.onmessage = (event: MessageEvent<string>): void => {
+      if (closedByCleanup) return;
       let parsed: unknown;
       try {
         parsed = JSON.parse(event.data);
@@ -176,6 +265,13 @@ export function AgentDetail(): JSX.Element {
     };
     return () => {
       closedByCleanup = true;
+      // Detach handlers BEFORE close so any error/close fired by the close
+      // itself can't reach the (now-stale) closure. Setting to no-op is
+      // safer than `null` because some browsers re-fire on null assignment.
+      ws.onopen = null;
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.onmessage = null;
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
       }
@@ -200,10 +296,31 @@ export function AgentDetail(): JSX.Element {
           { role: "compare", question: message, result, ts: new Date().toISOString() },
         ]);
       } else {
-        const result = await api.chat(agentId, message);
+        // Thread the most recent N turns back to the backend so the SDK can
+        // resolve pronouns + follow-ups. Compare-mode lines are skipped (they
+        // don't have a single role) and the just-appended user line isn't
+        // included — `message` is sent separately. Capping at 12 keeps the
+        // wire payload bounded; older turns still surface through memory
+        // semantic search.
+        const priorMessages: ChatMessage[] = chat
+          .filter(
+            (line): line is Extract<ChatLine, { role: "user" | "agent" }> =>
+              line.role === "user" || line.role === "agent",
+          )
+          .slice(-12)
+          .map((line) => ({ role: line.role, content: line.text }));
+        const result = await api.chat(agentId, message, priorMessages);
         setChat((prev) => [
           ...prev,
-          { role: "agent", text: result.response, ts: new Date().toISOString() },
+          {
+            role: "agent",
+            text: result.response,
+            ts: new Date().toISOString(),
+            informed: {
+              memories: result.memories_used_snippets ?? [],
+              directives: result.directives_used ?? [],
+            },
+          },
         ]);
       }
     } catch (error) {
@@ -258,6 +375,7 @@ export function AgentDetail(): JSX.Element {
   };
 
   const onDream = async (): Promise<void> => {
+    dismissDreamHint();
     setDreaming(true);
     try {
       await api.triggerDream(agentId);
@@ -333,9 +451,8 @@ export function AgentDetail(): JSX.Element {
           </button>
         </div>
       </header>
-      {sidePane === "cognition" ? (
-        <CognitionStream events={cognition} />
-      ) : (
+      {sidePane === "cognition" && <CognitionStream events={cognition} />}
+      {sidePane === "memories" && (
         <MemoryBrowser
           query={memoryQuery}
           setQuery={setMemoryQuery}
@@ -359,15 +476,18 @@ export function AgentDetail(): JSX.Element {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onDream}
-              disabled={dreaming}
-              className="flex min-h-[36px] items-center gap-1 rounded-md border border-violet-700/40 bg-violet-700/10 px-3 py-1.5 text-xs text-violet-200 hover:bg-violet-700/20 disabled:opacity-50"
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              {dreaming ? "Dreaming…" : "Dream now"}
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={onDream}
+                disabled={dreaming}
+                className="flex min-h-[36px] items-center gap-1 rounded-md border border-violet-700/40 bg-violet-700/10 px-3 py-1.5 text-xs text-violet-200 hover:bg-violet-700/20 disabled:opacity-50"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                {dreaming ? "Dreaming…" : "Dream now"}
+              </button>
+              {showDreamHint && <DreamHint onDismiss={dismissDreamHint} />}
+            </div>
             {!hideCrud && (
               <button
                 type="button"
@@ -392,7 +512,7 @@ export function AgentDetail(): JSX.Element {
             chat={chat}
             sending={sending}
             starters={detail.conversation_starters ?? []}
-            onPickStarter={(text) => void sendMessage(text)}
+            onPickStarter={(text) => setDraft(text)}
           />
         )}
 
@@ -478,6 +598,11 @@ export function AgentDetail(): JSX.Element {
           </aside>
         </div>
       )}
+
+      {/* Floating memory minimap. Always rendered (md+ only); shows an empty
+          state until the agent captures its first memory. Hidden once the
+          session ends so the SessionEndedView isn't competing with it. */}
+      {sessionStateName === "active" && <MemoryMapOverlay nodes={mapNodes} />}
 
       {tierError && <TierModal error={tierError} onDismiss={() => setTierError(null)} />}
     </div>
@@ -605,23 +730,124 @@ function ChatStream(props: {
         if (line.role === "compare") {
           return <CompareRow key={i} result={line.result} />;
         }
-        return (
-          <div key={i} className={line.role === "user" ? "flex justify-end" : "flex justify-start"}>
-            <div
-              className={`max-w-[80%] whitespace-pre-wrap rounded-lg px-4 py-2 text-sm ${
-                line.role === "user"
-                  ? "bg-emerald-700/30 text-emerald-50"
-                  : "bg-zinc-800 text-zinc-100"
-              }`}
-            >
-              {line.text}
+        if (line.role === "user") {
+          return (
+            <div key={i} className="flex justify-end">
+              <div className="max-w-[80%] whitespace-pre-wrap rounded-lg bg-emerald-700/30 px-4 py-2 text-sm text-emerald-50">
+                {line.text}
+              </div>
             </div>
-          </div>
-        );
+          );
+        }
+        return <AgentMessageRow key={i} text={line.text} informed={line.informed} />;
       })}
       {props.sending && (
         <div className="flex justify-start text-xs text-zinc-500">…thinking</div>
       )}
+    </div>
+  );
+}
+
+// Floating popover anchored to the Dream button. Renders absolutely so it
+// can drape below the header without disturbing layout. Caller controls
+// visibility — this component only renders the chrome and the dismiss
+// button. Forkable: it's a generic onboarding pattern, not demo-specific.
+function DreamHint(props: { onDismiss: () => void }): JSX.Element {
+  return (
+    <div
+      role="tooltip"
+      className="absolute right-0 top-[calc(100%+8px)] z-20 w-64 rounded-md border border-violet-600/50 bg-zinc-950/95 p-3 text-xs text-zinc-200 shadow-xl"
+    >
+      <div className="absolute -top-1.5 right-6 h-3 w-3 rotate-45 border-l border-t border-violet-600/50 bg-zinc-950" />
+      <div className="flex items-start gap-2">
+        <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-300" />
+        <p className="flex-1 leading-snug">
+          Try a <span className="text-violet-200">dream cycle</span> — the agent
+          consolidates this conversation into long-term memory and may surface a new
+          directive.
+        </p>
+        <button
+          type="button"
+          onClick={props.onDismiss}
+          className="text-zinc-500 hover:text-zinc-200"
+          aria-label="Dismiss hint"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Agent message: markdown bubble + optional "what informed this answer"
+// disclosure. The disclosure is the in-chat surface for the same memories
+// and directives the SDK Compare endpoint reports — letting visitors see
+// the grounding without flipping the Compare-mode toggle.
+function AgentMessageRow(props: { text: string; informed?: InformedBy }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const memCount = props.informed?.memories.length ?? 0;
+  const dirCount = props.informed?.directives.length ?? 0;
+  const hasAny = memCount + dirCount > 0;
+
+  return (
+    <div className="flex justify-start">
+      <div className="flex max-w-[80%] flex-col gap-1">
+        <div className="rounded-lg bg-zinc-800 px-4 py-2 text-zinc-100">
+          <ChatMarkdown text={props.text} />
+        </div>
+        {hasAny && (
+          <div className="text-[11px]">
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              className="flex items-center gap-1 text-zinc-500 transition hover:text-zinc-300"
+              aria-expanded={open}
+            >
+              {open ? (
+                <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
+              )}
+              <span>
+                Informed by {memCount} {memCount === 1 ? "memory" : "memories"} ·{" "}
+                {dirCount} {dirCount === 1 ? "directive" : "directives"}
+              </span>
+            </button>
+            {open && (
+              <div className="mt-2 space-y-2 rounded-md border border-zinc-800 bg-zinc-950/60 p-2 text-zinc-300">
+                {memCount > 0 && (
+                  <div>
+                    <p className="mb-1 text-[10px] uppercase tracking-wider text-emerald-400">
+                      Memories
+                    </p>
+                    <ul className="space-y-1">
+                      {props.informed!.memories.map((m, idx) => (
+                        <li key={idx} className="border-l-2 border-emerald-700/40 pl-2 leading-snug">
+                          {m}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {dirCount > 0 && (
+                  <div>
+                    <p className="mb-1 text-[10px] uppercase tracking-wider text-amber-400">
+                      Directives
+                    </p>
+                    <ul className="space-y-1">
+                      {props.informed!.directives.map((d, idx) => (
+                        <li key={idx} className="border-l-2 border-amber-700/40 pl-2 leading-snug">
+                          {d}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

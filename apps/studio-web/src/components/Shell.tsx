@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Plus, Settings as SettingsIcon, Brain, BookOpen, Menu, X } from "lucide-react";
+import { Plus, Settings as SettingsIcon, BookOpen, Menu, X } from "lucide-react";
 import clsx from "clsx";
 import { useStudio } from "../lib/store";
 import type { AgentSummary } from "../types/api";
@@ -28,7 +28,7 @@ export function Shell(): JSX.Element {
     <>
       <div className="flex items-center justify-between gap-2 px-5 py-4 text-sm font-semibold tracking-wide text-zinc-100">
         <span className="flex items-center gap-2">
-          <Brain className="h-5 w-5 text-emerald-400" />
+          <img src="/wisdom-icon.png" alt="" className="h-5 w-5" />
           Wisdom Studio
         </span>
         <button
@@ -134,7 +134,7 @@ export function Shell(): JSX.Element {
           <Menu className="h-5 w-5" />
         </button>
         <span className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
-          <Brain className="h-4 w-4 text-emerald-400" />
+          <img src="/wisdom-icon.png" alt="" className="h-4 w-4" />
           Wisdom Studio
         </span>
         <SessionTimer />
@@ -145,7 +145,7 @@ export function Shell(): JSX.Element {
         <aside className="hidden flex-col border-r border-zinc-800 bg-zinc-900/40 md:flex">
           <div className="hidden items-center justify-between gap-2 px-5 py-4 text-sm font-semibold tracking-wide text-zinc-100 md:flex">
             <span className="flex items-center gap-2">
-              <Brain className="h-5 w-5 text-emerald-400" />
+              <img src="/wisdom-icon.png" alt="" className="h-5 w-5" />
               Wisdom Studio
             </span>
             <SessionTimer />

@@ -35,9 +35,23 @@ Each seed file matches the `SeedSpec` Pydantic model in
 - `agent_id` — stable id used for the on-disk directory and SDK session.
   Re-applying a seed against an existing `agent_id` is a no-op.
 - `name`, `archetype`, `llm_provider` — shape the agent.
+- `persona` — identity-first system text. Treated as the agent's hard
+  identity layer at compose time, so write it as instructions the agent
+  inhabits ("You are X. You introduce yourself as X."), not as advice
+  about how to behave.
+- `directives[]` — short rules surfaced on the agent manifest. **Until the
+  SDK exposes a seed-time directive installer, the bundled personas also
+  duplicate each rule into `memories[]` as a `kind: "directive"` entry**
+  so it actually reaches the runtime context. Drop both copies if your
+  fork doesn't need rules-as-memories.
 - `memories[]` — each entry has `kind` (`conversation`, `fact`, `directive`,
   or `session_record`), a JSON `content` object, and an optional
-  timezone-aware `created_at`.
+  timezone-aware `created_at`. Mix biographical facts ("typical session
+  shape", "self-description rule") with the meta-rules — biographical
+  memories shape responses to identity questions ("what are you good
+  at?") that meta-rules alone don't anchor.
+- `conversation_starters[]` — up to five short suggestions (≤80 chars
+  each) rendered as clickable chips on the agent's empty chat. Optional.
 
 ## Pairing seeds with deployment knobs
 

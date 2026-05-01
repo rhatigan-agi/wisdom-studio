@@ -79,9 +79,18 @@ export interface AgentDetail extends AgentSummary {
   conversation_starters: string[];
 }
 
+export interface ChatMessage {
+  role: "user" | "agent";
+  content: string;
+}
+
 export interface ChatRequest {
   message: string;
   capture?: boolean;
+  // Recent prior turns. Forwarded to the SDK's `respond_loop` as
+  // `session_context` so follow-ups resolve against actual prior turns
+  // instead of being treated as standalone prompts.
+  prior_messages?: ChatMessage[];
 }
 
 export interface ChatResponse {
@@ -90,6 +99,12 @@ export interface ChatResponse {
   composed_chars: number;
   truncated_layers: string[];
   snapshot_id: string;
+  // Studio gathers these AFTER respond_loop() returns so the SPA can show
+  // "what informed this answer" without depending on SDK-internal state.
+  // Empty when retrieval fails (logged server-side, swallowed) or when the
+  // agent has no relevant memories / no active directives.
+  memories_used_snippets: string[];
+  directives_used: string[];
 }
 
 // SDK dashboard `/api/chat` (mounted at /agents/{id}/api/chat). The SDK route

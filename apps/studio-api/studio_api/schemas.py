@@ -165,16 +165,38 @@ class AgentDetail(AgentSummary):
 # --- Chat (Studio-owned wrapper around respond_loop) -------------------------
 
 
+class ChatMessage(BaseModel):
+    """One prior turn of a conversation, threaded back into the SDK as
+    ``session_context`` so the agent can resolve pronouns and follow-ups."""
+
+    role: Literal["user", "agent"]
+    content: str
+
+
 class ChatRequest(BaseModel):
     message: str
     capture: bool = True
+    # Recent prior turns the SPA tracks client-side. Forwarded to the SDK's
+    # respond_loop as ``session_context`` (layer 4 of context composition) so
+    # follow-ups like "track them down" resolve against the actual prior user
+    # turn instead of being treated as a standalone prompt. None / empty is
+    # equivalent to "no prior context".
+    prior_messages: list[ChatMessage] | None = None
 
 
 class ChatResponse(BaseModel):
-    """Mirror of :class:`wisdom_layer.integration.respond.RespondResult`.
+    """Mirror of :class:`wisdom_layer.integration.respond.RespondResult`,
+    plus a snapshot of the memories and directives that informed the answer.
 
     Studio strips the SDK helper's ``metadata`` field (Studio surfaces the
     SDK's own status/provenance routes for that detail).
+
+    The ``memories_used_snippets`` and ``directives_used`` fields are gathered
+    by Studio after ``respond_loop()`` returns — they re-run the same
+    semantic-search and active-directives queries the helper used internally,
+    so the SPA can show "what informed this answer" without depending on
+    SDK-internal state. Failures during gathering are swallowed (the chat
+    response is the contract; disclosure is a transparency affordance).
     """
 
     response: str
@@ -182,3 +204,5 @@ class ChatResponse(BaseModel):
     composed_chars: int = 0
     truncated_layers: list[str] = Field(default_factory=list)
     snapshot_id: str = ""
+    memories_used_snippets: list[str] = Field(default_factory=list)
+    directives_used: list[str] = Field(default_factory=list)

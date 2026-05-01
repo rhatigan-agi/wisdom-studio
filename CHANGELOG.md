@@ -7,7 +7,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.7.1] - 2026-04-30
+## [0.7.2] - 2026-05-01
+
+### Added
+
+- **Floating memory minimap (`MemoryMapOverlay`).** A bottom-right corner
+  overlay (md+ only) renders the agent's captured memories as a 2D force
+  graph independent of the side pane's Cognition / Memories tabs. Always
+  present once the page loads — empty state shows "No memories yet" with a
+  hint, then populates live as the cognition stream emits `memory.captured`
+  events. Collapsible to a 40 px circle with a badge counter; collapse state
+  persists in `localStorage` (`wisdom-studio:memory-map-collapsed`). Hidden
+  on small screens so it doesn't obscure the chat input.
+- **In-chat conversation history threading.** Chat turns now thread the most
+  recent 12 user/agent messages back through the SDK's `respond_loop` as
+  `session_context`, so follow-up questions ("can you elaborate on that?",
+  "what about the second option?") resolve against the actual prior turn
+  instead of being treated as a standalone prompt. The wire payload is
+  capped to keep request size bounded; older turns continue to surface
+  through the SDK's memory semantic search. New `prior_messages` field on
+  `ChatRequest` (backend) and `ChatMessage[]` arg on `api.chat()` (frontend).
+- **Markdown rendering in agent messages (`ChatMarkdown`).** Agent replies
+  now render with `react-markdown` + `remark-gfm` so headings, lists, code
+  blocks, tables, and links display correctly. User messages still render as
+  plain text (whitespace-preserving) since markdown in user prompts is
+  almost always unintentional formatting noise.
+- **"What informed this answer" per-message disclosure.** Every agent
+  message gets an "Informed by N memories · M directives" toggle. Expanding
+  it shows the actual memory snippets and directive text the SDK grounded
+  the response on — the same data the Compare-mode panel surfaces, but
+  inline per-message, so visitors can audit the wisdom layer's contribution
+  without flipping a global toggle.
+- **Conversation-starter chips.** Empty chat state now renders the
+  `conversation_starters` array from each seed JSON as one-click chips that
+  populate the input box. (Click does **not** auto-send — it primes the
+  draft so visitors can edit before submitting.) Three seed personas
+  (`researcher`, `coding_assistant`, `support_agent`) ship with starter
+  arrays out of the box.
+- **Rewritten seed personas with biographical memories.** The three example
+  seeds were rewritten identity-first: each persona now carries a coherent
+  professional bio in `persona`, plus pre-seeded `event_type=biographical`
+  memories captured at first boot so "what are you good at?" gives a
+  grounded answer from turn one rather than a generic LLM response.
+- **One-shot Dream-cycle onboarding hint.** After a visitor sends two
+  messages, a dismissible tooltip anchors to the Dream button explaining
+  what a dream cycle does. Persistent installs use `localStorage`;
+  ephemeral demos use `sessionStorage` so each new visitor sees the hint
+  exactly once.
+- **`Makefile` developer entry point.** `make dev` runs backend + frontend
+  together with auto-install on first run; sentinel rules re-sync only when
+  lockfiles change. Other targets: `install`, `test{,-api,-web}`,
+  `lint{,-api,-web}`, `typecheck`, `build`, `docker{,-run}`, `clean`. CI
+  invokes the same shell commands so local and CI behavior match.
+
+### Fixed
+
+- **WebSocket cognition stream stays connected under React 18 StrictMode.**
+  In dev, StrictMode runs effect → cleanup → effect on every mount. The
+  first cleanup's `ws.close()` on a still-CONNECTING socket fired both
+  `onerror` and `onclose` events, which raced the second mount's `onopen`
+  and clobbered `wsState` back to `"closed"` — leaving the Cognition pane
+  permanently dark and gating the memory-map seed probe (which waits for
+  `wsState === "live"` before hitting the SDK memory route). The effect now
+  guards every handler with a `closedByCleanup` flag and nullifies the
+  handlers before close, so events fired by the close itself can't reach
+  the stale closure. Production builds are unaffected (StrictMode double-
+  invocation is dev-only).
+- **Backend logs `studio.ws.session_boot_failed` on WS handshake errors.**
+  The cognition WebSocket handler previously swallowed exceptions during
+  session boot, leaving operators with a silent "WS closed" in the SPA and
+  no server-side breadcrumb. Failures during `build_agent` /
+  `dashboard.ws_hub` initialization now log with the exception message and
+  close the socket with code 4500 and a truncated reason — making
+  diagnostics tractable in production.
+- **Conversation-starter chips no longer auto-send on click.** Click now
+  populates the input box only; the visitor edits and submits explicitly.
+  The previous behavior of auto-sending made the chips unusable as
+  exploration prompts.
+- **Seed path resolves correctly in both Docker and host dev.**
+  `WISDOM_STUDIO_SEED_PATH` accepts a relative path and resolves it from
+  the repo root (Docker `WORKDIR=/app`, host `_REPO_ROOT`). A single value
+  in `.env` (`examples/seeds/researcher.json`) now works in both
+  environments without a separate Docker override.
+- **Backend test suite isolates from `.env` and shell environment.**
+  v0.7.1's addition of `.env` loading to `settings.py` for `make dev`
+  ergonomics inadvertently broke 10 tests that asserted "absent unless
+  set" semantics for env knobs. Two-layer defense: a
+  `STUDIO_DISABLE_DOTENV` env knob in `settings.py` short-circuits dotenv
+  loading, and an autouse `_isolate_env` conftest fixture sets the knob
+  AND strips every `WISDOM_STUDIO_*`, `WISDOM_LAYER_*`, and provider-key
+  env var via `monkeypatch.delenv`. Both layers needed: clearing env alone
+  fails (`.env` still loaded), disabling dotenv alone fails (real shell env
+  still leaks).
+
+
 
 ### Fixed
 
@@ -254,7 +347,8 @@ Initial public release. Apache-2.0.
   (per-user persistence) so a single image can serve many bind-mounted data
   directories without rebuilding.
 
-[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.6.0...v0.6.1

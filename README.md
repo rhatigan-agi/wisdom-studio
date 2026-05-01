@@ -39,28 +39,27 @@ the first-run screen). See the SDK docs for tier details.
 
 ## Run for development
 
+Prereqs: [`uv`](https://docs.astral.sh/uv/) for the backend, [`pnpm`](https://pnpm.io/installation) (Node 20) for the frontend.
+
 ```bash
 git clone https://github.com/rhatigan-agi/wisdom-studio
 cd wisdom-studio
-
-# Backend (FastAPI on :8765)
-cd apps/studio-api
-uv sync
-uv run uvicorn studio_api.main:app --reload --port 8765 &
-
-# Frontend (Vite on :5173, proxies /api and /ws to :8765)
-cd ../studio-web
-pnpm install
-pnpm dev
+make dev       # auto-installs deps on first run; Ctrl-C stops both
 ```
 
-Tests:
+Open <http://localhost:5173>. Backend runs on :8765; Vite proxies `/api` and `/ws` to it.
+
+`make help` lists every target. Common ones:
 
 ```bash
-cd apps/studio-api && uv run pytest         # backend
-cd apps/studio-web && pnpm tsc --noEmit     # frontend types
-cd apps/studio-web && pnpm build            # production bundle
+make test        # backend pytest + frontend vitest
+make lint        # ruff + eslint
+make typecheck   # tsc --noEmit
+make build       # frontend production bundle
+make docker      # build the single-container image locally
 ```
+
+Prefer two terminals? `make dev-api` and `make dev-web` run them separately.
 
 ## Customize / fork
 

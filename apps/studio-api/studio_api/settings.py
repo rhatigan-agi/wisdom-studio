@@ -40,12 +40,29 @@ _BANNER_ALLOWED_ATTRS: dict[str, list[str]] = {
 }
 
 
+# Repo root sits four levels above this file
+# (studio_api/settings.py → studio_api → apps/studio-api → apps → repo root).
+# We load .env from the repo root so `make dev` (cwd = apps/studio-api) and
+# any other invocation point find the same file. Production (Docker) gets its
+# env from the container runtime, not a .env file — pydantic silently skips
+# missing files, so this is safe.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+# Test escape hatch: setting STUDIO_DISABLE_DOTENV=1 skips dotenv loading so a
+# developer's repo-root .env (full of demo-deployment overrides) doesn't leak
+# into the test run. The conftest sets it autouse; production never sets it.
+_DOTENV_FILES: tuple[Path | str, ...] = (
+    () if os.environ.get("STUDIO_DISABLE_DOTENV") else (_REPO_ROOT / ".env", ".env")
+)
+
+
 class StudioSettings(BaseSettings):
     """Process-level configuration. Per-agent settings live in the registry."""
 
     model_config = SettingsConfigDict(
         env_prefix="WISDOM_STUDIO_",
-        env_file=".env",
+        # Repo-root .env first, then cwd .env (later files override earlier).
+        env_file=_DOTENV_FILES,
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -211,6 +228,21 @@ class StudioSettings(BaseSettings):
     @property
     def config_path(self) -> Path:
         return self.data_dir / "studio.json"
+
+    @property
+    def seed_path_resolved(self) -> Path | None:
+        """Resolve ``seed_path`` to an absolute path.
+
+        A relative value is resolved against the repo root (which is also the
+        Docker WORKDIR ``/app``) so the same env value — e.g.
+        ``examples/seeds/researcher.json`` — works in both ``make dev`` and the
+        container. Absolute paths are returned untouched.
+        """
+        if self.seed_path is None:
+            return None
+        if self.seed_path.is_absolute():
+            return self.seed_path
+        return _REPO_ROOT / self.seed_path
 
     @property
     def env_provider_keys(self) -> dict[LLMProvider, str]:

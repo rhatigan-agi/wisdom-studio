@@ -21,7 +21,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from studio_api.schemas import AgentDetail, Archetype, LLMProvider, StorageKind
+from studio_api.schemas import AgentDetail, Archetype, ConversationStarter, LLMProvider, StorageKind
 from studio_api.settings import settings
 from studio_api.store import get_agent
 
@@ -57,23 +57,44 @@ class SeedSpec(BaseModel):
     persona: str = ""
     directives: list[str] = Field(default_factory=list)
     memories: list[SeedMemory] = Field(default_factory=list)
+    # Optional clickable chips rendered on the agent's empty chat. Same shape
+    # as AgentCreate.conversation_starters so the manifest round-trips cleanly.
+    conversation_starters: list[ConversationStarter] = Field(
+        default_factory=list, max_length=5
+    )
 
     llm_provider: LLMProvider = "anthropic"
     llm_model: str | None = None
     storage_kind: StorageKind = "sqlite"
 
 
-def load_seed(path: Path) -> SeedSpec | None:
-    """Read and validate a seed file. Return None and log on any error."""
+def load_seed(path: Path, *, configured: Path | None = None) -> SeedSpec | None:
+    """Read and validate a seed file. Return None and log on any error.
+
+    ``path`` is the absolute, resolved path that will actually be opened.
+    ``configured`` is the operator-supplied value (relative or absolute) used
+    only for clearer log output — when the operator wrote
+    ``WISDOM_STUDIO_SEED_PATH=examples/seeds/researcher.json`` we want to
+    surface both that value and the absolute path we tried, so the fix is
+    obvious.
+    """
+    shown = str(configured) if configured is not None else str(path)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        logger.warning("studio.seed.not_found", extra={"seed_path": str(path)})
+        # Loud (error, not warning) because a missing seed combined with
+        # ``WISDOM_STUDIO_EPHEMERAL=true`` produces a dead-end UI ("No agents
+        # available") with no in-app way to recover. The log is the only
+        # actionable surface.
+        logger.error(
+            "studio.seed.not_found",
+            extra={"seed_path": shown, "resolved_path": str(path)},
+        )
         return None
     except json.JSONDecodeError as exc:
         logger.warning(
             "studio.seed.invalid_json",
-            extra={"seed_path": str(path), "error": str(exc)},
+            extra={"seed_path": shown, "resolved_path": str(path), "error": str(exc)},
         )
         return None
     try:
@@ -81,7 +102,7 @@ def load_seed(path: Path) -> SeedSpec | None:
     except ValidationError as exc:
         logger.warning(
             "studio.seed.schema_invalid",
-            extra={"seed_path": str(path), "errors": exc.errors()},
+            extra={"seed_path": shown, "resolved_path": str(path), "errors": exc.errors()},
         )
         return None
 
@@ -104,6 +125,7 @@ def _persist_seed_manifest(spec: SeedSpec) -> AgentDetail:
         llm_model=spec.llm_model,
         storage_kind=spec.storage_kind,
         storage_url=None,
+        conversation_starters=list(spec.conversation_starters),
         created_at=datetime.now(UTC),
         last_active_at=None,
     )
