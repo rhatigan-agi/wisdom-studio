@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-30
+
+### Added
+
+- **`WISDOM_STUDIO_EPHEMERAL`** — single-visitor demo posture. Disables
+  `studio.json` writes (visitor config never persists across container
+  restarts), forces `hide_settings` and `hide_agent_crud` true (so the
+  Settings page and agent create/delete affordances are suppressed), and
+  combines with `WISDOM_STUDIO_SESSION_TTL_MINUTES` /
+  `WISDOM_STUDIO_TOKEN_CAP_PER_SESSION` for bounded try-it-now boxes.
+  Provider keys must come from env vars in this mode (FirstRun is hidden).
+- **`WISDOM_STUDIO_TOKEN_CAP_PER_SESSION`** — hard cap on input + output
+  tokens per session. Counted across every SDK-driven call (chat turns,
+  dreams, critic, directive runs) via the SDK's cost aggregator. When the
+  cap is reached the backend returns 410 with a structured body and the SPA
+  renders a "session limit reached" view in place of the chat input.
+  Defense-in-depth: the gate is enforced server-side so a scripted client
+  that ignores the SPA banner can't keep burning tokens.
+- **Backend-anchored session TTL.** The TTL clock now starts on first
+  WebSocket connect (rather than client wall-clock), is exposed via
+  `GET /api/agents/{agent_id}/session`, and gates the chat endpoint
+  server-side. The visible countdown in `SessionTimer` continues to render
+  client-side, but the server is now the source of truth — bouncing the WS
+  can't reset a visitor's countdown, and a closed tab can't extend it.
+- **`WISDOM_STUDIO_SESSION_END_CTA_HREF`** /
+  **`WISDOM_STUDIO_SESSION_END_CTA_LABEL`** — optional CTA shown on the
+  session-ended / cap-reached view. Forks point this at signup, marketing,
+  or a calendar URL. Empty string suppresses the CTA entirely (same
+  convention as `WISDOM_STUDIO_SIGNUP_URL`).
+- **`SessionStateError`** in the frontend API client. Mirrors the backend's
+  410-with-structured-body for `session_ended` / `token_cap_reached`. The
+  SPA flips to the end-state view synchronously on `chat()` failure rather
+  than waiting for the next 5-second poll tick.
+
+### Changed
+
+- **`WISDOM_STUDIO_SIGNUP_URL` default is now empty.** Previously defaulted
+  to `https://wisdomlayer.ai/signup/`. The public source no longer ships a
+  hardcoded commercial CTA — when the env var is unset, the FirstRun /
+  Settings link is suppressed. Deployments that want the CTA (including the
+  hosted Wisdom Layer demo) set the env var explicitly. Same applies to the
+  README's "unlock higher caps" line, which now points at
+  `WISDOM_LAYER_LICENSE` rather than a specific signup URL.
+
+### Internal
+
+- **`fly.toml.example`** — committed template for forks deploying to Fly.io.
+  Mirrors the `.env` / `.env.example` split: `fly.toml` is gitignored for
+  per-fork operational config; the example documents the shape (1 GB RAM,
+  `min_machines_running=1`, `/api/health` healthcheck, non-secret env in
+  `[env]`, secrets via `fly secrets set`).
+- **`studio_api.cost`** — single touch point around the SDK cost subsystem.
+  Today it wraps `BaseBackend.cost_summary_aggregate`; when SDK 1.1.1 ships
+  a public `cost.recorded` event, the implementation can swap to an
+  in-process subscription without touching any call sites in
+  `SessionManager`.
+- **README**: dropped the stale `linux/arm64` claim from the highlights bullet.
+  v0.6.1 narrowed the GHCR publish to amd64-only; the README still advertised
+  multi-arch.
+
 ### Fixed
 
 - **Provider-key and license env vars are now actually honored.**
@@ -28,6 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   No code change is required for forks that were already setting these env
   vars — the behavior matches what the docs always promised.
+
+## [0.6.1] - 2026-04-30
 
 ### Fixed
 
@@ -145,7 +207,8 @@ Initial public release. Apache-2.0.
   (per-user persistence) so a single image can serve many bind-mounted data
   directories without rebuilding.
 
-[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/rhatigan-agi/wisdom-studio/releases/tag/v0.5.0

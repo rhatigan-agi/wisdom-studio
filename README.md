@@ -15,7 +15,7 @@ fork the whole thing as a starter for your own product.
 
 ## Highlights
 
-- **Single-port Docker image.** One container serves both SPA and API. Multi-arch (`linux/amd64`, `linux/arm64`) on every tag.
+- **Single-port Docker image.** One container serves both SPA and API. Published to GHCR (`linux/amd64`) on every tag.
 - **Compare mode.** Toggle a side-by-side view of one question answered three ways — baseline / memory-only / full-wisdom — so the SDK's contribution is visible without scripted demos.
 - **Mobile-responsive.** Slide-in sidebar, slide-up cognition pane, 44px touch targets. Embeddable in marketing sites without breakage.
 - **Forker-friendly.** Seven generic env vars shape the deployment without code changes. `kiosk/` namespace and a one-page [`FORKING.md`](./FORKING.md) make it obvious what to keep and what to delete.
@@ -34,8 +34,8 @@ start chatting. State (agents, SQLite databases, settings) lives in
 `$HOME/.wisdom-studio` so it survives container restarts.
 
 A Wisdom Layer license key is **optional** — the Free tier works out of the
-box. To unlock higher caps, [sign up at wisdomlayer.ai](https://wisdomlayer.ai/signup/)
-and paste the key on the first-run screen.
+box. To unlock higher caps, set `WISDOM_LAYER_LICENSE` (or paste the key on
+the first-run screen). See the SDK docs for tier details.
 
 ## Run for development
 
@@ -74,6 +74,9 @@ Studio is shaped for forking. The most common changes don't require code:
 | Hide the settings panel | `WISDOM_STUDIO_HIDE_SETTINGS=true` |
 | Pre-seed an agent at boot | `WISDOM_STUDIO_SEED_PATH=examples/seeds/researcher.json` |
 | Visible session timer (kiosk) | `WISDOM_STUDIO_SESSION_TTL_MINUTES=15` |
+| Cap the LLM tokens any one visitor can spend | `WISDOM_STUDIO_TOKEN_CAP_PER_SESSION=50000` |
+| Single-visitor demo / try-it-now box | `WISDOM_STUDIO_EPHEMERAL=true` (no studio.json writes; Settings + agent CRUD hidden; pair with TTL or token cap) |
+| CTA shown on the session-ended view | `WISDOM_STUDIO_SESSION_END_CTA_HREF=https://your.signup` `WISDOM_STUDIO_SESSION_END_CTA_LABEL='Make your own'` |
 | Custom docs link in the sidebar | `WISDOM_STUDIO_DOCS_URL=https://your.docs/site` |
 | Custom signup CTA next to the license-key field | `WISDOM_STUDIO_SIGNUP_URL=https://your.signup/page` |
 | Hide the signup CTA entirely (forks without a hosted backend) | `WISDOM_STUDIO_SIGNUP_URL=` (empty) |

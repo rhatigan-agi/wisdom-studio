@@ -10,14 +10,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI
 from starlette.routing import Mount
 from wisdom_layer import WisdomAgent
 from wisdom_layer.dashboard.ws_hub import WebSocketHub
 
-from studio_api.schemas import AgentDetail, LLMProvider
+from studio_api.cost import session_token_total
+from studio_api.schemas import AgentDetail, LLMProvider, SessionState, SessionStateName
 from studio_api.sdk_factory import build_agent
 from studio_api.sdk_mount import build_sdk_subapp
 from studio_api.settings import settings
@@ -41,6 +43,62 @@ class AgentSession:
     sub_app: FastAPI
     mount: Mount
     lock: asyncio.Lock
+    # Session lifecycle (kiosk / ephemeral). The TTL clock starts on the
+    # first WebSocket connect via ``mark_started`` — not on session creation
+    # — so a visitor doesn't burn time during HTTP-only warmup.
+    started_at: datetime | None = None
+    expires_at: datetime | None = None
+    tokens_used: int = 0
+    state: SessionStateName = "active"
+    _start_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    def to_state(self) -> SessionState:
+        return SessionState(
+            agent_id=self.detail.agent_id,
+            state=self.state,
+            started_at=self.started_at,
+            expires_at=self.expires_at,
+            tokens_used=self.tokens_used,
+            token_cap=settings.token_cap_per_session,
+            session_ttl_minutes=settings.session_ttl_minutes,
+        )
+
+    async def mark_started(self) -> None:
+        """Start the TTL clock on first WebSocket connect.
+
+        Idempotent — subsequent connects (e.g. browser reconnect) keep the
+        original start time so a visitor can't reset their own session by
+        bouncing the WS.
+        """
+        if self.started_at is not None:
+            return
+        async with self._start_lock:
+            if self.started_at is not None:
+                return
+            now = datetime.now(UTC)
+            self.started_at = now
+            if settings.session_ttl_minutes is not None:
+                self.expires_at = now + timedelta(minutes=settings.session_ttl_minutes)
+
+    async def refresh_state(self) -> SessionState:
+        """Recompute token usage and TTL state from the SDK + wall clock.
+
+        Called from the request hot path before we touch the LLM. Cheap when
+        no cap is configured (skips the SDK call); when a cap is configured,
+        it's a single backend aggregate query keyed by ``started_at``.
+        """
+        if self.state != "active":
+            return self.to_state()
+        if self.expires_at is not None and datetime.now(UTC) >= self.expires_at:
+            self.state = "session_ended"
+            return self.to_state()
+        if settings.token_cap_per_session is not None and self.started_at is not None:
+            self.tokens_used = await session_token_total(
+                self.agent, self.started_at.isoformat()
+            )
+            if self.tokens_used >= settings.token_cap_per_session:
+                self.state = "token_cap_reached"
+        return self.to_state()
 
 
 class SessionManager:

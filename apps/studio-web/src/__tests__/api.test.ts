@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TierError, api } from "../lib/api";
+import { SessionStateError, TierError, api } from "../lib/api";
 
 const originalFetch = globalThis.fetch;
 
@@ -86,5 +86,48 @@ describe("api request wrapper", () => {
     // mistakenly render an upgrade modal.
     mockFetch({ detail: "Settings are read-only in this deployment." }, { status: 403 });
     await expect(api.health()).rejects.not.toBeInstanceOf(TierError);
+  });
+
+  it("throws SessionStateError on a 410 session_ended body", async () => {
+    mockFetch(
+      {
+        error: "session_ended",
+        agent_id: "demo",
+        tokens_used: 0,
+        token_cap: null,
+        started_at: "2026-04-30T10:00:00+00:00",
+        expires_at: "2026-04-30T10:30:00+00:00",
+      },
+      { status: 410 },
+    );
+    try {
+      await api.chat("demo", "anything");
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SessionStateError);
+      const sse = err as SessionStateError;
+      expect(sse.body.error).toBe("session_ended");
+      expect(sse.body.agent_id).toBe("demo");
+    }
+  });
+
+  it("throws SessionStateError on a 410 token_cap_reached body", async () => {
+    mockFetch(
+      {
+        error: "token_cap_reached",
+        agent_id: "demo",
+        tokens_used: 50001,
+        token_cap: 50000,
+        started_at: "2026-04-30T10:00:00+00:00",
+        expires_at: null,
+      },
+      { status: 410 },
+    );
+    await expect(api.chat("demo", "x")).rejects.toBeInstanceOf(SessionStateError);
+  });
+
+  it("falls back to a generic Error when a 410 body lacks session-ended shape", async () => {
+    mockFetch({ detail: "Gone." }, { status: 410 });
+    await expect(api.chat("demo", "x")).rejects.not.toBeInstanceOf(SessionStateError);
   });
 });

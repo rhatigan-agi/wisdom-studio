@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Activity, Database, Sparkles, Send, Trash, Trash2, Lock, X, PanelRightOpen, Layers } from "lucide-react";
-import { TierError, api } from "../lib/api";
+import { SessionStateError, TierError, api } from "../lib/api";
 import { useStudio } from "../lib/store";
 import { SESSION_EXPIRED_EVENT } from "../components/kiosk/SessionTimer";
+import { SessionEndedView } from "../components/kiosk/SessionEndedView";
 import type {
   AgentDetail as AgentDetailType,
   ChatCompareResponse,
   CognitionEvent,
+  SessionStateName,
 } from "../types/api";
 
 type SidePane = "cognition" | "memories";
@@ -67,6 +69,35 @@ export function AgentDetail(): JSX.Element {
   const [paneOpen, setPaneOpen] = useState(false);
 
   const [wsState, setWsState] = useState<WsState>("idle");
+
+  // Server-confirmed session lifecycle. Polled when the deployment configures
+  // a TTL or token cap; otherwise stays "active" and the surface renders
+  // normally. SessionStateError on chat flips this synchronously so the
+  // visitor doesn't see the chat input after they've been gated.
+  const sessionTtl = useStudio((s) => s.config?.session_ttl_minutes ?? null);
+  const tokenCap = useStudio((s) => s.config?.token_cap_per_session ?? null);
+  const sessionGated = sessionTtl !== null || tokenCap !== null;
+  const [sessionState, setSessionState] = useState<SessionStateName>("active");
+
+  useEffect(() => {
+    if (!agentId || !sessionGated) return;
+    let cancelled = false;
+    const tick = async (): Promise<void> => {
+      try {
+        const state = await api.getSessionState(agentId);
+        if (!cancelled) setSessionState(state.state);
+      } catch {
+        // Network blips shouldn't kick a visitor out — they'll see the
+        // gated state on the next /chat attempt regardless.
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [agentId, sessionGated]);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,6 +196,11 @@ export function AgentDetail(): JSX.Element {
     } catch (error) {
       if (error instanceof TierError) {
         setTierError(error);
+      } else if (error instanceof SessionStateError) {
+        // Surface the server-confirmed end-state immediately rather than
+        // waiting for the next 5-second poll tick — keeps the chat input
+        // from sticking around after the user is gated.
+        setSessionState(error.body.error);
       } else {
         const text = error instanceof Error ? error.message : String(error);
         setChat((prev) => [
@@ -326,14 +362,25 @@ export function AgentDetail(): JSX.Element {
           </div>
         </header>
 
-        <ChatStream
-          chat={chat}
-          sending={sending}
-          starters={detail.conversation_starters ?? []}
-          onPickStarter={(text) => void sendMessage(text)}
-        />
+        {sessionState !== "active" ? (
+          <div className="flex-1 overflow-y-auto">
+            <SessionEndedView state={sessionState} />
+          </div>
+        ) : (
+          <ChatStream
+            chat={chat}
+            sending={sending}
+            starters={detail.conversation_starters ?? []}
+            onPickStarter={(text) => void sendMessage(text)}
+          />
+        )}
 
-        <form onSubmit={onSend} className="border-t border-zinc-800 bg-zinc-900/40 px-4 py-3 sm:px-6">
+        <form
+          onSubmit={onSend}
+          className={`border-t border-zinc-800 bg-zinc-900/40 px-4 py-3 sm:px-6 ${
+            sessionState !== "active" ? "hidden" : ""
+          }`}
+        >
           <div className="mb-2 flex items-center justify-between gap-2">
             <label className="flex items-center gap-2 text-xs text-zinc-400">
               <button

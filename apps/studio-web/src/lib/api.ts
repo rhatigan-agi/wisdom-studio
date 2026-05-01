@@ -9,6 +9,8 @@ import type {
   ChatResponse,
   ExampleSummary,
   MemoryEntry,
+  SessionState,
+  SessionStateName,
   StudioConfig,
   StudioConfigUpdate,
 } from "../types/api";
@@ -58,6 +60,37 @@ function isTierBody(payload: unknown): payload is TierErrorBody {
   return err === "feature_gated" || err === "cap_reached";
 }
 
+interface SessionEndedBody {
+  error: SessionStateName;
+  agent_id: string;
+  tokens_used: number;
+  token_cap: number | null;
+  started_at: string | null;
+  expires_at: string | null;
+}
+
+// Thrown when the server returns 410 because a kiosk / ephemeral session has
+// either timed out (`session_ended`) or hit its token cap
+// (`token_cap_reached`). The SPA renders the configured CTA in response;
+// generic 410s without this shape still surface as plain `Error`.
+export class SessionStateError extends Error {
+  readonly status: number;
+  readonly body: SessionEndedBody;
+
+  constructor(body: SessionEndedBody) {
+    super(body.error);
+    this.name = "SessionStateError";
+    this.status = 410;
+    this.body = body;
+  }
+}
+
+function isSessionEndedBody(payload: unknown): payload is SessionEndedBody {
+  if (typeof payload !== "object" || payload === null) return false;
+  const err = (payload as { error?: unknown }).error;
+  return err === "session_ended" || err === "token_cap_reached";
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
@@ -73,6 +106,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       } catch (err) {
         if (err instanceof TierError) throw err;
         // Fall through to the generic path on JSON parse failure.
+      }
+    }
+    // 410 with a session-ended shape is the kiosk / ephemeral end-state. The
+    // SPA renders the configured CTA on this; non-shaped 410s fall through.
+    if (response.status === 410) {
+      try {
+        const body = await response.clone().json();
+        if (isSessionEndedBody(body)) throw new SessionStateError(body);
+      } catch (err) {
+        if (err instanceof SessionStateError) throw err;
       }
     }
     const message = await response.text();
@@ -167,4 +210,9 @@ export const api = {
     request(`${sdk(id)}/directives?include_inactive=${includeInactive}`),
 
   getStatus: (id: string): Promise<Record<string, unknown>> => request(`${sdk(id)}/status`),
+
+  // Live session lifecycle. Polled by the SessionTimer so the SPA stays in
+  // sync with backend enforcement instead of trusting client wall-clock.
+  getSessionState: (id: string): Promise<SessionState> =>
+    request(`${studio}/agents/${id}/session`),
 };

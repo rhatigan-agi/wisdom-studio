@@ -17,6 +17,10 @@ function setConfig(patch: Partial<StudioConfig>): void {
       locked_llm: null,
       hide_settings: false,
       hide_agent_crud: false,
+      ephemeral: false,
+      token_cap_per_session: null,
+      session_end_cta_href: null,
+      session_end_cta_label: null,
       ...patch,
     },
   });

@@ -1,0 +1,63 @@
+# Wisdom Studio — Fly.io deployment template.
+#
+# Copy to `fly.toml` (gitignored) and edit for your deployment, then:
+#   fly apps create <your-app-name>
+#   fly secrets set --app <your-app-name> ANTHROPIC_API_KEY=sk-... WISDOM_LAYER_LICENSE=wl_...
+#   fly deploy --app <your-app-name> --image ghcr.io/rhatigan-agi/wisdom-studio:latest
+#
+# DNS: point a subdomain (e.g. studio.example.com) at <your-app-name>.fly.dev
+# via a CNAME record, then `fly certs add studio.example.com`.
+
+app = "wisdom-studio-FORK"   # change me
+primary_region = "iad"       # pick the Fly region nearest your visitors
+
+# Image is supplied at deploy time via `fly deploy --image ...` so the public
+# GHCR build is the source of truth. No [build] section needed.
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # Single-visitor kiosk demos shouldn't cold-start. For a heavier-traffic
+  # public demo set min_machines_running >= 2 and let auto_stop_machines = true.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  # 1 GB minimum — the SDK pulls sentence-transformers / PyTorch which OOM
+  # at 512 MB. Bump to "shared-cpu-2x" (2 GB) for heavier demo loads.
+  memory = "1gb"
+
+# Persistent volume is OPTIONAL when WISDOM_STUDIO_EPHEMERAL=true (the demo
+# posture below). Uncomment if your fork persists agents across restarts.
+# [mounts]
+#   source = "wisdom_studio_data"
+#   destination = "/data"
+
+# --- Non-secret env vars -----------------------------------------------------
+# Secrets (ANTHROPIC_API_KEY, WISDOM_LAYER_LICENSE, OPENAI_API_KEY, etc.)
+# go via `fly secrets set` — never put them here.
+[env]
+  WISDOM_STUDIO_DATA_DIR = "/data"
+
+  # Hosted-demo posture. Comment out any block you don't want.
+  WISDOM_STUDIO_EPHEMERAL = "true"
+  WISDOM_STUDIO_SESSION_TTL_MINUTES = "15"
+  WISDOM_STUDIO_TOKEN_CAP_PER_SESSION = "50000"
+  # WISDOM_STUDIO_LOCK_PROVIDER = "anthropic"
+  # WISDOM_STUDIO_SEED_PATH = "/app/examples/seeds/researcher.json"
+
+  # Funnel — point at your own signup / docs URLs (or leave unset).
+  # WISDOM_STUDIO_BANNER_HTML = "<strong>Demo</strong> sandbox — sessions reset every 15 minutes."
+  # WISDOM_STUDIO_SIGNUP_URL = "https://example.com/signup"
+  # WISDOM_STUDIO_SESSION_END_CTA_HREF = "https://example.com/signup"
+  # WISDOM_STUDIO_SESSION_END_CTA_LABEL = "Make your own"
+  # WISDOM_STUDIO_DOCS_URL = "https://example.com/docs"

@@ -31,6 +31,14 @@ export interface StudioConfig {
   locked_llm: LockedLLM | null;
   hide_settings: boolean;
   hide_agent_crud: boolean;
+  // Ephemeral / try-it-now posture. When `ephemeral` is true the SPA hides
+  // Save/Export/Download affordances and the Settings page is suppressed
+  // (the server forces `hide_settings`). `token_cap_per_session` and the
+  // session_end_cta_* fields shape the session-ended view.
+  ephemeral: boolean;
+  token_cap_per_session: number | null;
+  session_end_cta_href: string | null;
+  session_end_cta_label: string | null;
 }
 
 export interface StudioConfigUpdate {
@@ -134,3 +142,17 @@ export interface ExampleSummary {
 
 // SDK memory router returns a flat list (no `{memories, total}` wrapper).
 export type MemoryEntry = Record<string, unknown>;
+
+// Live per-agent session state, returned by GET /api/agents/{id}/session and
+// also baked into the 410 body when /chat is gated.
+export type SessionStateName = "active" | "session_ended" | "token_cap_reached";
+
+export interface SessionState {
+  agent_id: string;
+  state: SessionStateName;
+  started_at: string | null;
+  expires_at: string | null;
+  tokens_used: number;
+  token_cap: number | null;
+  session_ttl_minutes: number | null;
+}

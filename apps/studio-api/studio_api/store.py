@@ -37,15 +37,25 @@ _PERSISTED_FIELDS: tuple[str, ...] = ("license_key", "provider_keys", "initializ
 
 
 def _runtime_overlay() -> dict[str, object]:
-    """Read-only fields injected from current env settings on every load."""
+    """Read-only fields injected from current env settings on every load.
+
+    Ephemeral mode forces ``hide_settings`` and ``hide_agent_crud`` true
+    regardless of the explicit env vars. A try-it-now demo box can never
+    accept persistent config from a visitor's browser (Settings) and
+    visitors should never be able to create/delete the seeded agent (CRUD).
+    """
     return {
         "banner_html": settings.banner_html,
         "session_ttl_minutes": settings.session_ttl_minutes,
         "docs_url": settings.docs_url,
         "signup_url": settings.signup_url,
         "locked_llm": settings.locked_llm,
-        "hide_settings": settings.hide_settings,
-        "hide_agent_crud": settings.hide_agent_crud,
+        "hide_settings": settings.hide_settings or settings.ephemeral,
+        "hide_agent_crud": settings.hide_agent_crud or settings.ephemeral,
+        "ephemeral": settings.ephemeral,
+        "token_cap_per_session": settings.token_cap_per_session,
+        "session_end_cta_href": settings.session_end_cta_href,
+        "session_end_cta_label": settings.session_end_cta_label,
     }
 
 
@@ -78,7 +88,15 @@ def load_studio_config() -> StudioConfig:
 
 
 def save_studio_config(config: StudioConfig) -> None:
-    """Persist only the user-saved fields. Runtime/env fields are not written."""
+    """Persist only the user-saved fields. Runtime/env fields are not written.
+
+    No-ops in ephemeral mode — a try-it-now box must not retain any visitor
+    config across container restarts. The PUT /api/config endpoint already
+    returns 403 when ``hide_settings`` is true (ephemeral implies it), so
+    this is defense-in-depth for any internal call paths.
+    """
+    if settings.ephemeral:
+        return
     _ensure_dirs()
     payload = config.model_dump(include=set(_PERSISTED_FIELDS))
     settings.config_path.write_text(

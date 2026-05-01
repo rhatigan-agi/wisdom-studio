@@ -29,6 +29,7 @@ from studio_api.schemas import (
     ChatRequest,
     ChatResponse,
     ExampleSummary,
+    SessionState,
     StudioConfig,
     StudioConfigUpdate,
 )
@@ -254,11 +255,45 @@ async def post_agent_from_example(slug: str) -> AgentDetail:
     return create_agent(spec)
 
 
+# --- Session state (kiosk / ephemeral) ---------------------------------------
+
+
+def _session_state_response(state: SessionState) -> JSONResponse:
+    """Return a 410 with the same structured body the SPA expects for end-states.
+
+    410 Gone is the right semantic — the resource (chat session) has been
+    intentionally retired and won't come back without a fresh container. The
+    body carries enough data for the SPA to render the configured CTA
+    without re-fetching ``/api/config``.
+    """
+    return JSONResponse(
+        status_code=410,
+        content={
+            "error": state.state,
+            "agent_id": state.agent_id,
+            "tokens_used": state.tokens_used,
+            "token_cap": state.token_cap,
+            "started_at": state.started_at.isoformat() if state.started_at else None,
+            "expires_at": state.expires_at.isoformat() if state.expires_at else None,
+        },
+    )
+
+
+@app.get("/api/agents/{agent_id}/session", response_model=SessionState)
+async def get_session_state(agent_id: str) -> SessionState:
+    """Return the live session state. Polled by the SPA's session-timer view."""
+    try:
+        session = await session_manager.get_or_create(agent_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return await session.refresh_state()
+
+
 # --- Chat (thin wrapper around SDK respond_loop) -----------------------------
 
 
 @app.post("/api/agents/{agent_id}/chat", response_model=ChatResponse)
-async def chat(agent_id: str, request: ChatRequest) -> ChatResponse:
+async def chat(agent_id: str, request: ChatRequest) -> Response:
     """Single-turn chat backed by the SDK reference integration helper.
 
     The SDK dashboard's own ``/api/chat`` route is a baseline-vs-wisdom *demo*
@@ -272,6 +307,13 @@ async def chat(agent_id: str, request: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     async with session.lock:
+        # Defense-in-depth gate. The frontend renders an end-state view as
+        # soon as the cap or TTL trips, but we re-check here so a scripted
+        # client that ignores the SPA banner can't keep burning tokens.
+        state = await session.refresh_state()
+        if state.state != "active":
+            return _session_state_response(state)
+
         if request.capture:
             await session.agent.memory.capture(
                 "conversation",
@@ -290,12 +332,20 @@ async def chat(agent_id: str, request: ChatRequest) -> ChatResponse:
                 {"role": "agent", "text": result.response},
             )
 
-        return ChatResponse(
-            response=result.response,
-            memories_used=result.memories_used,
-            composed_chars=result.composed_chars,
-            truncated_layers=result.truncated_layers,
-            snapshot_id=result.snapshot_id,
+        # Refresh after the LLM call so the next request sees the post-call
+        # token total. If this turn pushed us over the cap, the *next* request
+        # will be rejected — this turn's response is honored (we already paid
+        # for it).
+        await session.refresh_state()
+
+        return JSONResponse(
+            content=ChatResponse(
+                response=result.response,
+                memories_used=result.memories_used,
+                composed_chars=result.composed_chars,
+                truncated_layers=result.truncated_layers,
+                snapshot_id=result.snapshot_id,
+            ).model_dump()
         )
 
 
@@ -315,6 +365,10 @@ async def cognition_socket(websocket: WebSocket, agent_id: str) -> None:
         await websocket.accept()
         await websocket.close(code=4404, reason=f"agent not found: {agent_id}")
         return
+
+    # First WS connect anchors the session-TTL clock. ``mark_started`` is
+    # idempotent — bouncing the WebSocket can't reset a visitor's countdown.
+    await session.mark_started()
 
     await session.hub.connect(websocket)
     try:

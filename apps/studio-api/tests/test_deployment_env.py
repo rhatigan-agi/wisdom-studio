@@ -634,3 +634,375 @@ def test_docs_url_unset_returns_null(tmp_path: Path, monkeypatch: pytest.MonkeyP
     with _boot_studio(tmp_path, monkeypatch) as client:
         body = client.get("/api/config").json()
         assert body["docs_url"] is None
+
+
+# --- 2.8 Ephemeral mode (v0.7) -----------------------------------------------
+
+
+def test_ephemeral_mode_exposed_in_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        WISDOM_STUDIO_EPHEMERAL="true",
+    ) as client:
+        body = client.get("/api/config").json()
+        assert body["ephemeral"] is True
+
+
+def test_ephemeral_mode_implies_hide_settings_and_crud(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ephemeral deployments suppress Settings + Agent CRUD even without the explicit flags.
+
+    A try-it-now demo box can't accept persistent visitor config (Settings)
+    and visitors should never delete the seeded agent (CRUD). The forced
+    overlay covers the case where an operator only sets ``EPHEMERAL=true``.
+    """
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        WISDOM_STUDIO_EPHEMERAL="true",
+    ) as client:
+        body = client.get("/api/config").json()
+        assert body["hide_settings"] is True
+        assert body["hide_agent_crud"] is True
+
+
+def test_ephemeral_mode_blocks_studio_json_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``save_studio_config`` must no-op under ephemeral mode.
+
+    Defense-in-depth: PUT /api/config already returns 403 when ``hide_settings``
+    is true (which ephemeral implies), but if any internal call path tries to
+    persist config the file should still not appear on disk.
+    """
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        WISDOM_STUDIO_EPHEMERAL="true",
+    ):
+        from studio_api.schemas import StudioConfig
+        from studio_api.store import save_studio_config
+
+        save_studio_config(StudioConfig(license_key="leak", initialized=True))
+        assert not (tmp_path / "studio.json").exists()
+
+
+def test_ephemeral_default_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    with _boot_studio(tmp_path, monkeypatch) as client:
+        body = client.get("/api/config").json()
+        assert body["ephemeral"] is False
+
+
+# --- 2.9 Token cap per session (v0.7) ----------------------------------------
+
+
+def test_token_cap_per_session_exposed_in_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        WISDOM_STUDIO_TOKEN_CAP_PER_SESSION="50000",
+    ) as client:
+        body = client.get("/api/config").json()
+        assert body["token_cap_per_session"] == 50000
+
+
+def test_token_cap_unset_returns_null(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    with _boot_studio(tmp_path, monkeypatch) as client:
+        body = client.get("/api/config").json()
+        assert body["token_cap_per_session"] is None
+
+
+# --- 2.10 Session-end CTA (v0.7) ---------------------------------------------
+
+
+def test_session_end_cta_round_trips(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        WISDOM_STUDIO_SESSION_END_CTA_HREF="https://example.com/signup",
+        WISDOM_STUDIO_SESSION_END_CTA_LABEL="Get your own",
+    ) as client:
+        body = client.get("/api/config").json()
+        assert body["session_end_cta_href"] == "https://example.com/signup"
+        assert body["session_end_cta_label"] == "Get your own"
+
+
+def test_session_end_cta_empty_string_is_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``WISDOM_STUDIO_SESSION_END_CTA_HREF=`` (empty) must read as null.
+
+    Same convention as ``WISDOM_STUDIO_SIGNUP_URL`` — explicit opt-out without
+    needing to unset the env var, so forks that always pass the var through
+    can disable the CTA by setting it blank.
+    """
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        WISDOM_STUDIO_SESSION_END_CTA_HREF="",
+        WISDOM_STUDIO_SESSION_END_CTA_LABEL="",
+    ) as client:
+        body = client.get("/api/config").json()
+        assert body["session_end_cta_href"] is None
+        assert body["session_end_cta_label"] is None
+
+
+# --- 2.11 Session lifecycle (TTL + cap enforcement, v0.7) --------------------
+
+
+def test_session_state_inactive_when_ttl_expired(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``refresh_state`` flips to ``session_ended`` once ``expires_at`` passes."""
+    from datetime import UTC, datetime, timedelta
+
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        WISDOM_STUDIO_SESSION_TTL_MINUTES="30",
+    ):
+        from studio_api.sessions import AgentSession
+
+        # Build a minimally-faked session — refresh_state only reads
+        # `started_at` / `expires_at` and (for the cap branch) the SDK agent.
+        session = AgentSession.__new__(AgentSession)
+        session.detail = type("_D", (), {"agent_id": "x"})()
+        session.agent = None  # not touched when TTL is the gate
+        session.tokens_used = 0
+        session.state = "active"
+        session.started_at = datetime.now(UTC) - timedelta(minutes=31)
+        session.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        import asyncio
+
+        result = asyncio.run(session.refresh_state())
+        assert result.state == "session_ended"
+
+
+def test_session_state_inactive_when_token_cap_reached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the SDK's cost aggregate >= cap, state flips to ``token_cap_reached``."""
+    from datetime import UTC, datetime
+
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        WISDOM_STUDIO_TOKEN_CAP_PER_SESSION="100",
+    ):
+        from studio_api.sessions import AgentSession
+
+        session = AgentSession.__new__(AgentSession)
+        session.detail = type("_D", (), {"agent_id": "x"})()
+
+        class _FakeBackend:
+            async def cost_summary_aggregate(
+                self, *, agent_id: str, since: str | None, until: str | None
+            ) -> dict[str, object]:
+                return {"total_input_tokens": 75, "total_output_tokens": 50}
+
+        class _FakeAgent:
+            agent_id = "x"
+            _backend = _FakeBackend()
+
+        session.agent = _FakeAgent()
+        session.tokens_used = 0
+        session.state = "active"
+        session.started_at = datetime.now(UTC)
+        session.expires_at = None
+
+        import asyncio
+
+        result = asyncio.run(session.refresh_state())
+        assert result.state == "token_cap_reached"
+        assert result.tokens_used == 125
+
+
+def test_session_state_endpoint_returns_active_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GET /api/agents/{id}/session is reachable even without TTL / cap configured.
+
+    Returns ``active`` because no clock or cap is configured. The SPA only
+    polls when one of them is set, but the endpoint must still answer
+    cleanly.
+    """
+    with _boot_studio(tmp_path, monkeypatch) as client:
+        client.post(
+            "/api/agents",
+            json={"name": "Probe", "archetype": "balanced", "llm_provider": "ollama"},
+        )
+
+    captured: dict[str, object] = {}
+
+    class _FakeAgent:
+        def __init__(self, agent_id: str) -> None:
+            self.agent_id = agent_id
+
+        async def initialize(self) -> None:
+            return None
+
+        def on(self, _name: str, _handler: object) -> object:
+            return object()
+
+        def off(self, _token: object) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    def _fake_build_agent(detail, *, provider_api_key, license_key):  # type: ignore[no-untyped-def]
+        captured["called"] = True
+        return _FakeAgent(detail.agent_id)
+
+    with _boot_studio(tmp_path, monkeypatch) as client:
+        import studio_api.sessions as sessions_module
+
+        monkeypatch.setattr(sessions_module, "build_agent", _fake_build_agent)
+        response = client.get("/api/agents/probe/session")
+        assert response.status_code == 200
+        assert response.json()["state"] == "active"
+
+
+def test_chat_returns_410_when_token_cap_reached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Defense-in-depth: chat endpoint refuses to bill the LLM once the cap trips.
+
+    The SPA's SessionEndedView renders the same structured body, so a
+    scripted client that ignores the SPA banner still gets a clean 410 with
+    ``error: token_cap_reached`` rather than burning more tokens.
+    """
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        WISDOM_STUDIO_TOKEN_CAP_PER_SESSION="100",
+        ANTHROPIC_API_KEY="sk-test",
+    ) as client:
+        client.post(
+            "/api/agents",
+            json={"name": "Probe", "archetype": "balanced", "llm_provider": "anthropic"},
+        )
+
+    class _FakeBackend:
+        async def cost_summary_aggregate(
+            self, *, agent_id: str, since: str | None, until: str | None
+        ) -> dict[str, object]:
+            return {"total_input_tokens": 200, "total_output_tokens": 0}
+
+    class _FakeAgent:
+        def __init__(self, agent_id: str) -> None:
+            self.agent_id = agent_id
+            self._backend = _FakeBackend()
+
+        async def initialize(self) -> None:
+            return None
+
+        def on(self, _name: str, _handler: object) -> object:
+            return object()
+
+        def off(self, _token: object) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    def _fake_build_agent(detail, *, provider_api_key, license_key):  # type: ignore[no-untyped-def]
+        return _FakeAgent(detail.agent_id)
+
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        WISDOM_STUDIO_TOKEN_CAP_PER_SESSION="100",
+        ANTHROPIC_API_KEY="sk-test",
+    ) as client:
+        import studio_api.sessions as sessions_module
+
+        monkeypatch.setattr(sessions_module, "build_agent", _fake_build_agent)
+
+        # Anchor the session clock so refresh_state queries the cost backend.
+        # In production the WS connect handler does this; in the test we call
+        # it directly so the chat endpoint sees a started session.
+        import asyncio
+
+        session = asyncio.run(sessions_module.session_manager.get_or_create("probe"))
+        asyncio.run(session.mark_started())
+
+        response = client.post(
+            "/api/agents/probe/chat", json={"message": "hi", "capture": False}
+        )
+        assert response.status_code == 410
+        body = response.json()
+        assert body["error"] == "token_cap_reached"
+        assert body["agent_id"] == "probe"
+        assert body["tokens_used"] == 200
+        assert body["token_cap"] == 100
+
+
+def test_chat_returns_410_when_ttl_expired(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same defense-in-depth gate, TTL branch."""
+    from datetime import UTC, datetime, timedelta
+
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        WISDOM_STUDIO_SESSION_TTL_MINUTES="5",
+        ANTHROPIC_API_KEY="sk-test",
+    ) as client:
+        client.post(
+            "/api/agents",
+            json={"name": "Probe", "archetype": "balanced", "llm_provider": "anthropic"},
+        )
+
+    class _FakeAgent:
+        def __init__(self, agent_id: str) -> None:
+            self.agent_id = agent_id
+
+        async def initialize(self) -> None:
+            return None
+
+        def on(self, _name: str, _handler: object) -> object:
+            return object()
+
+        def off(self, _token: object) -> None:
+            return None
+
+        async def close(self) -> None:
+            return None
+
+    def _fake_build_agent(detail, *, provider_api_key, license_key):  # type: ignore[no-untyped-def]
+        return _FakeAgent(detail.agent_id)
+
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        WISDOM_STUDIO_SESSION_TTL_MINUTES="5",
+        ANTHROPIC_API_KEY="sk-test",
+    ) as client:
+        import studio_api.sessions as sessions_module
+
+        monkeypatch.setattr(sessions_module, "build_agent", _fake_build_agent)
+
+        import asyncio
+
+        session = asyncio.run(sessions_module.session_manager.get_or_create("probe"))
+        # Force the session into an expired window — equivalent to a visitor
+        # idling past the TTL.
+        session.started_at = datetime.now(UTC) - timedelta(minutes=10)
+        session.expires_at = datetime.now(UTC) - timedelta(minutes=5)
+
+        response = client.post(
+            "/api/agents/probe/chat", json={"message": "hi", "capture": False}
+        )
+        assert response.status_code == 410
+        body = response.json()
+        assert body["error"] == "session_ended"

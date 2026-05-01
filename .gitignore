@@ -43,6 +43,9 @@ apps/studio-web/build/
 .env.*.local
 studio.json
 
+# Local Fly deployment config (committed: fly.toml.example)
+fly.toml
+
 # IDE
 .idea/
 .vscode/*

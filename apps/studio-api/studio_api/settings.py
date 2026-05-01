@@ -71,9 +71,30 @@ class StudioSettings(BaseSettings):
     hide_agent_crud: bool = Field(default=False)
     docs_url: str | None = Field(default=None)
     # Where the SPA points the "don't have a key?" link beside the license-key
-    # input. Defaults to the public Wisdom Layer signup; forks override or set
-    # empty string to suppress the CTA entirely.
-    signup_url: str | None = Field(default="https://wisdomlayer.ai/signup/")
+    # input. Unset by default so the public source ships without a hardcoded
+    # commercial CTA; deployments wire it via env. Empty string is treated the
+    # same as unset (suppresses the link).
+    signup_url: str | None = Field(default=None)
+
+    # --- Ephemeral / try-it-now deployment posture ---------------------------
+    #
+    # Ephemeral mode shapes a single-visitor demo box: studio.json is never
+    # written, the SDK is pointed at a per-process tmp data dir, FirstRun is
+    # skipped (env keys must be set), and the SPA hides Settings + any
+    # Save/Export/Download affordances. Combine with `session_ttl_minutes`
+    # and/or `token_cap_per_session` to bound a session.
+    ephemeral: bool = Field(default=False)
+    # Hard cap on total LLM tokens (input + output) per session before the
+    # backend returns 410 and the SPA renders the session-ended view. Counts
+    # all SDK-driven calls — chat turns, dreams, critic, directives — via the
+    # shared cost wrapper.
+    token_cap_per_session: int | None = Field(default=None, ge=1)
+    # Optional CTA shown on the session-ended / cap-reached view. Forks set
+    # `session_end_cta_href` to a signup or marketing URL and override the
+    # button label. Empty string suppresses the CTA entirely (same convention
+    # as `signup_url`).
+    session_end_cta_href: str | None = Field(default=None)
+    session_end_cta_label: str | None = Field(default=None)
 
     # --- Provider credentials (env-only, never persisted) --------------------
     #
@@ -104,7 +125,7 @@ class StudioSettings(BaseSettings):
         default=None, validation_alias=AliasChoices("WISDOM_LAYER_LICENSE")
     )
 
-    @field_validator("signup_url", "docs_url")
+    @field_validator("signup_url", "docs_url", "session_end_cta_href", "session_end_cta_label")
     @classmethod
     def _empty_string_is_none(cls, value: str | None) -> str | None:
         """Treat ``WISDOM_STUDIO_SIGNUP_URL=`` as "hide" rather than a literal empty URL.

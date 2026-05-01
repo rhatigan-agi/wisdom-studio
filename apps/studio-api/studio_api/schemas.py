@@ -73,6 +73,32 @@ class StudioConfig(BaseModel):
     hide_settings: bool = False
     hide_agent_crud: bool = False
 
+    # Ephemeral / try-it-now posture (see settings.py for details).
+    ephemeral: bool = False
+    token_cap_per_session: int | None = None
+    session_end_cta_href: str | None = None
+    session_end_cta_label: str | None = None
+
+
+SessionStateName = Literal["active", "session_ended", "token_cap_reached"]
+
+
+class SessionState(BaseModel):
+    """Live per-agent session state for kiosk / ephemeral deployments.
+
+    Returned from ``GET /api/agents/{agent_id}/session`` and broadcast over
+    the cognition WebSocket so the SPA can render the session-ended view in
+    sync with backend enforcement.
+    """
+
+    agent_id: str
+    state: SessionStateName = "active"
+    started_at: datetime | None = None
+    expires_at: datetime | None = None
+    tokens_used: int = 0
+    token_cap: int | None = None
+    session_ttl_minutes: int | None = None
+
 
 class StudioConfigUpdate(BaseModel):
     license_key: str | None = None
