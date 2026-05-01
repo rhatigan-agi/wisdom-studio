@@ -40,13 +40,25 @@ _BANNER_ALLOWED_ATTRS: dict[str, list[str]] = {
 }
 
 
-# Repo root sits four levels above this file
-# (studio_api/settings.py → studio_api → apps/studio-api → apps → repo root).
-# We load .env from the repo root so `make dev` (cwd = apps/studio-api) and
-# any other invocation point find the same file. Production (Docker) gets its
-# env from the container runtime, not a .env file — pydantic silently skips
-# missing files, so this is safe.
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+# Anchor for repo-root-relative paths (.env, default examples/, seed_path).
+# Two layouts must work:
+#   * Host dev: studio_api/settings.py is at apps/studio-api/studio_api/ — the
+#     repo root is four levels up.
+#   * Docker:   the package is flattened to /app/studio_api/ and `examples/`
+#     is copied to /app/examples — the anchor is /app, only two levels up.
+# Walking up looking for an `examples/` dir handles both without hardcoding
+# either depth. Falling back to the file's parent if neither layout matches
+# keeps surprise out of forks that restructure the tree (.env will simply not
+# load — pydantic silently skips missing files).
+def _find_anchor() -> Path:
+    here = Path(__file__).resolve()
+    for candidate in here.parents:
+        if (candidate / "examples").is_dir():
+            return candidate
+    return here.parent
+
+
+_REPO_ROOT = _find_anchor()
 
 # Test escape hatch: setting STUDIO_DISABLE_DOTENV=1 skips dotenv loading so a
 # developer's repo-root .env (full of demo-deployment overrides) doesn't leak
@@ -70,7 +82,7 @@ class StudioSettings(BaseSettings):
     # --- Process plumbing ----------------------------------------------------
     data_dir: Path = Field(default=Path(".wisdom-studio"))
     examples_dir: Path = Field(
-        default_factory=lambda: Path(__file__).resolve().parents[3] / "examples",
+        default_factory=lambda: _REPO_ROOT / "examples",
     )
     api_port: int = Field(default=8765)
     web_port: int = Field(default=5173)

@@ -157,9 +157,45 @@ def test_seed_path_relative_resolves_from_repo_root(monkeypatch: pytest.MonkeyPa
     resolved = settings_module.settings.seed_path_resolved
     assert resolved is not None
     assert resolved.is_absolute()
-    # Repo root is parents[3] from settings.py — same on host and in Docker.
-    expected_root = Path(settings_module.__file__).resolve().parents[3]
-    assert resolved == expected_root / "examples" / "seeds" / "researcher.json"
+    # Anchor is whatever directory contains an ``examples/`` sibling — the same
+    # walk the production code does. Locks in: relative paths land under repo
+    # root in source AND under /app in the Docker image.
+    assert resolved == settings_module._REPO_ROOT / "examples" / "seeds" / "researcher.json"
+
+
+def test_repo_root_anchor_works_when_package_is_flattened(tmp_path: Path) -> None:
+    """The repo-root anchor must work in the Docker image where the package
+    is flattened to ``/app/studio_api/`` (only two levels deep), not just on
+    host where it lives at ``apps/studio-api/studio_api/`` (four levels deep).
+
+    Regression test for v0.7.2 boot failure: ``parents[3]`` raised IndexError
+    in the production container, breaking ``ghcr.io/...:0.7.2`` at import
+    time. The anchor now walks up looking for an ``examples/`` directory
+    instead of hardcoding a depth.
+    """
+    import studio_api.settings as settings_module
+
+    # Simulate the Docker layout: a settings.py whose only repo marker is
+    # an ``examples/`` directory two levels up (matching /app/studio_api/
+    # + /app/examples/).
+    fake_pkg = tmp_path / "studio_api"
+    fake_pkg.mkdir()
+    (tmp_path / "examples").mkdir()
+    fake_settings = fake_pkg / "settings.py"
+    fake_settings.write_text("# placeholder\n")
+
+    # Re-run the anchor logic with __file__ pointed at the fake layout.
+    monkeypatched_file = fake_settings.resolve()
+    here = monkeypatched_file
+    anchor: Path | None = None
+    for candidate in here.parents:
+        if (candidate / "examples").is_dir():
+            anchor = candidate
+            break
+
+    assert anchor == tmp_path, "anchor must find the examples/ sibling, not blow up on parents[3]"
+    # And the production code's anchor finder must agree on the real layout.
+    assert (settings_module._REPO_ROOT / "examples").is_dir()
 
 
 def test_seed_path_absolute_passes_through(

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-05-01
+
+### Fixed
+
+- **Production Docker image boots again.** v0.7.2's switch to a repo-root-relative
+  seed-path resolver hardcoded `Path(__file__).resolve().parents[3]` for the
+  anchor, which works on host (`apps/studio-api/studio_api/settings.py`, four
+  levels deep) but raises `IndexError` in the production image where the package
+  is flattened to `/app/studio_api/` (only two levels deep). The container
+  failed with `IndexError: 3` during `studio_api.settings` import and never
+  reached uvicorn.
+
+  The anchor now walks up from `settings.py` looking for an `examples/` directory,
+  which exists at the repo root in source AND at `/app/examples` in the Docker
+  image. Both layouts resolve correctly without hardcoding either depth. Forks
+  that restructure the tree get a safe fallback (the file's own parent directory)
+  rather than an import-time crash.
+
+  **v0.7.2 is broken at boot in the published Docker image (`ghcr.io/rhatigan-agi/wisdom-studio:0.7.2`)
+  — upgrade directly to v0.7.3.** The host `make dev` flow was unaffected.
+
 ## [0.7.2] - 2026-05-01
 
 ### Added
@@ -347,7 +368,8 @@ Initial public release. Apache-2.0.
   (per-user persistence) so a single image can serve many bind-mounted data
   directories without rebuilding.
 
-[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.6.1...v0.7.0
