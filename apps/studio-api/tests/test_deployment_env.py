@@ -697,6 +697,59 @@ def test_ephemeral_default_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         assert body["ephemeral"] is False
 
 
+def test_ephemeral_swaps_data_dir_to_tmp_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With ``WISDOM_STUDIO_DATA_DIR`` unset, ephemeral mode must override.
+
+    The override isolates the SDK SQLite to a per-process tmp dir so a
+    forker who accidentally mounts a shared volume across containers can't
+    leak agent state between visitors.
+    """
+    monkeypatch.delenv("WISDOM_STUDIO_DATA_DIR", raising=False)
+    monkeypatch.setenv("WISDOM_STUDIO_EPHEMERAL", "true")
+
+    import studio_api.settings as settings_module
+
+    importlib.reload(settings_module)
+
+    resolved = settings_module.settings.data_dir
+    assert resolved.name.startswith("wisdom-studio-ephemeral-")
+    assert resolved.exists()
+    assert resolved.is_absolute()
+
+
+def test_ephemeral_respects_explicit_data_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An operator-supplied ``WISDOM_STUDIO_DATA_DIR`` is always honored.
+
+    Forkers who deliberately point ephemeral mode at a known path (perhaps
+    a per-machine volume already isolated at the orchestrator layer) must
+    not have their choice silently overridden by the tmp-dir swap.
+    """
+    explicit = tmp_path / "operator-chosen"
+    monkeypatch.setenv("WISDOM_STUDIO_DATA_DIR", str(explicit))
+    monkeypatch.setenv("WISDOM_STUDIO_EPHEMERAL", "true")
+
+    import studio_api.settings as settings_module
+
+    importlib.reload(settings_module)
+
+    assert settings_module.settings.data_dir == explicit
+    assert "wisdom-studio-ephemeral-" not in str(settings_module.settings.data_dir)
+
+
+def test_non_ephemeral_never_swaps_data_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without ephemeral, the default data dir is preserved as-is."""
+    monkeypatch.delenv("WISDOM_STUDIO_DATA_DIR", raising=False)
+    monkeypatch.delenv("WISDOM_STUDIO_EPHEMERAL", raising=False)
+
+    import studio_api.settings as settings_module
+
+    importlib.reload(settings_module)
+
+    assert settings_module.settings.data_dir == Path(".wisdom-studio")
+
+
 # --- 2.9 Token cap per session (v0.7) ----------------------------------------
 
 

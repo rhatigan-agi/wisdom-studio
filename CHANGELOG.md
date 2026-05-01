@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-04-30
+
+### Fixed
+
+- **`WISDOM_STUDIO_EPHEMERAL=true` now isolates the SDK SQLite per process.**
+  v0.7.0 documented that ephemeral mode "isolates" each visitor, but only the
+  `studio.json` writes were actually blocked — the SDK databases under
+  `data_dir/agents/` were still written to whatever path
+  `WISDOM_STUDIO_DATA_DIR` resolved to. On orchestrators where an ephemeral
+  container inherits a shared bind mount or RWX volume (Docker bind mounts,
+  Kubernetes RWX PVCs), two visitors hitting the same path could see each
+  other's agent state.
+
+  When `ephemeral=true` and `WISDOM_STUDIO_DATA_DIR` is **not** set explicitly,
+  Studio now rewrites `data_dir` to a per-process `tempfile.mkdtemp(prefix=
+  "wisdom-studio-ephemeral-")`. An `atexit` handler removes the directory on
+  graceful shutdown. Operators who deliberately set `WISDOM_STUDIO_DATA_DIR`
+  (e.g. pointing at a per-machine volume already isolated at the orchestrator
+  layer) are still respected — explicit configuration always wins.
+
+  Forks running `EPHEMERAL=true` on Fly Machines, single-instance Cloud Run
+  revisions, or any orchestrator that gives each container its own filesystem
+  see no behavioral change. Forks on multi-tenant shared filesystems
+  (Kubernetes ReadWriteMany, Docker bind mounts across replicas) get
+  isolation by construction without code changes.
+
+- **`SessionTimer` countdown now follows the backend's `expires_at`.** The
+  visible countdown previously started a fresh `Date.now()` clock at mount
+  time and decremented from `session_ttl_minutes * 60`. That diverged from
+  the backend's authoritative TTL clock (anchored on first WebSocket connect
+  and exposed via `GET /api/agents/{id}/session`) — a tab refresh restarted
+  the visible timer at full duration even though the server still considered
+  the session minutes-deep into its window.
+
+  The component now reads `expires_at` from the polled `SessionState` in the
+  Zustand store and recomputes remaining seconds each tick from
+  `(expires_at - Date.now())`. Bouncing the WebSocket, refreshing the SPA,
+  or remounting the page no longer resets the visible window — only the
+  server timestamp matters. The `wisdom-studio:session-expired` window
+  event still fires when the countdown hits zero so existing listeners
+  (e.g. `AgentDetail` navigation reset) keep working.
+
+  When chat returns 410 (`session_ended` / `token_cap_reached`), the
+  structured body's `started_at` / `expires_at` / `tokens_used` fields are
+  written into the store synchronously, so the SPA flips to the
+  session-ended view without waiting for the next 5-second poll tick.
+
 ## [0.7.0] - 2026-04-30
 
 ### Added
@@ -207,7 +254,8 @@ Initial public release. Apache-2.0.
   (per-user persistence) so a single image can serve many bind-mounted data
   directories without rebuilding.
 
-[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.5.0...v0.6.0

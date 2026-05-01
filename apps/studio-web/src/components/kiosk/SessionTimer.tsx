@@ -5,36 +5,41 @@ import { useStudio } from "../../lib/store";
 export const SESSION_EXPIRED_EVENT = "wisdom-studio:session-expired";
 
 // Kiosk / conference deployments set `WISDOM_STUDIO_SESSION_TTL_MINUTES` to
-// reset the visitor experience after a fixed window. The server doesn't
-// enforce the TTL itself — that's the SDK's per-session lifecycle. Studio
-// just renders a visible countdown and dispatches a window event when it
-// hits zero so listeners (e.g. AgentDetail) can navigate away or reset
-// transient UI state.
+// reset the visitor experience after a fixed window. The TTL clock is owned
+// by the backend (anchored on first WebSocket connect, exposed via
+// GET /api/agents/{id}/session). Studio polls that endpoint into the store
+// and this component just renders the remaining time. Once the gate trips
+// the chat endpoint returns 410 — the countdown is purely visual.
+//
+// The countdown is recomputed each tick from `expires_at - now`, NOT from
+// `Date.now()` at mount. That way bouncing the WS, refreshing the tab, or
+// re-mounting the component never resets a visitor's window — the only
+// authority is the backend timestamp.
 export function SessionTimer(): JSX.Element | null {
-  const ttlMinutes = useStudio((s) => s.config?.session_ttl_minutes ?? null);
-  const [secondsLeft, setSecondsLeft] = useState<number | null>(
-    ttlMinutes ? ttlMinutes * 60 : null,
+  const expiresAt = useStudio((s) => s.sessionState?.expires_at ?? null);
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(() =>
+    computeRemaining(expiresAt),
   );
 
   useEffect(() => {
-    if (!ttlMinutes) {
+    if (!expiresAt) {
       setSecondsLeft(null);
       return;
     }
-    setSecondsLeft(ttlMinutes * 60);
-    const start = Date.now();
-    const total = ttlMinutes * 60;
-    const id = window.setInterval(() => {
-      const elapsed = Math.floor((Date.now() - start) / 1000);
-      const remaining = Math.max(0, total - elapsed);
+    const update = (): number => {
+      const remaining = computeRemaining(expiresAt) ?? 0;
       setSecondsLeft(remaining);
       if (remaining === 0) {
-        window.clearInterval(id);
         window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
       }
+      return remaining;
+    };
+    if (update() === 0) return;
+    const id = window.setInterval(() => {
+      if (update() === 0) window.clearInterval(id);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [ttlMinutes]);
+  }, [expiresAt]);
 
   if (secondsLeft === null) return null;
 
@@ -55,4 +60,11 @@ export function SessionTimer(): JSX.Element | null {
       {expired ? "expired" : `${mm}:${String(ss).padStart(2, "0")}`}
     </div>
   );
+}
+
+function computeRemaining(expiresAt: string | null): number | null {
+  if (!expiresAt) return null;
+  const target = new Date(expiresAt).getTime();
+  if (Number.isNaN(target)) return null;
+  return Math.max(0, Math.floor((target - Date.now()) / 1000));
 }

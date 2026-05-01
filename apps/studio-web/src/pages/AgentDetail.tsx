@@ -9,7 +9,6 @@ import type {
   AgentDetail as AgentDetailType,
   ChatCompareResponse,
   CognitionEvent,
-  SessionStateName,
 } from "../types/api";
 
 type SidePane = "cognition" | "memories";
@@ -71,21 +70,27 @@ export function AgentDetail(): JSX.Element {
   const [wsState, setWsState] = useState<WsState>("idle");
 
   // Server-confirmed session lifecycle. Polled when the deployment configures
-  // a TTL or token cap; otherwise stays "active" and the surface renders
-  // normally. SessionStateError on chat flips this synchronously so the
-  // visitor doesn't see the chat input after they've been gated.
+  // a TTL or token cap; otherwise stays null and the surface renders normally.
+  // The polled state is mirrored into the store so SessionTimer can read
+  // `expires_at` directly from the backend authority. SessionStateError on
+  // chat flips this synchronously so the visitor doesn't see the chat input
+  // after they've been gated.
   const sessionTtl = useStudio((s) => s.config?.session_ttl_minutes ?? null);
   const tokenCap = useStudio((s) => s.config?.token_cap_per_session ?? null);
   const sessionGated = sessionTtl !== null || tokenCap !== null;
-  const [sessionState, setSessionState] = useState<SessionStateName>("active");
+  const setSessionState = useStudio((s) => s.setSessionState);
+  const sessionStateName = useStudio((s) => s.sessionState?.state ?? "active");
 
   useEffect(() => {
-    if (!agentId || !sessionGated) return;
+    if (!agentId || !sessionGated) {
+      setSessionState(null);
+      return;
+    }
     let cancelled = false;
     const tick = async (): Promise<void> => {
       try {
         const state = await api.getSessionState(agentId);
-        if (!cancelled) setSessionState(state.state);
+        if (!cancelled) setSessionState(state);
       } catch {
         // Network blips shouldn't kick a visitor out — they'll see the
         // gated state on the next /chat attempt regardless.
@@ -97,7 +102,15 @@ export function AgentDetail(): JSX.Element {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [agentId, sessionGated]);
+  }, [agentId, sessionGated, setSessionState]);
+
+  useEffect(() => {
+    return () => {
+      // Clear when the user navigates away so a stale countdown from one
+      // agent doesn't bleed into the dashboard for the next.
+      setSessionState(null);
+    };
+  }, [agentId, setSessionState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -200,7 +213,15 @@ export function AgentDetail(): JSX.Element {
         // Surface the server-confirmed end-state immediately rather than
         // waiting for the next 5-second poll tick — keeps the chat input
         // from sticking around after the user is gated.
-        setSessionState(error.body.error);
+        setSessionState({
+          agent_id: error.body.agent_id,
+          state: error.body.error,
+          started_at: error.body.started_at,
+          expires_at: error.body.expires_at,
+          tokens_used: error.body.tokens_used,
+          token_cap: error.body.token_cap,
+          session_ttl_minutes: sessionTtl,
+        });
       } else {
         const text = error instanceof Error ? error.message : String(error);
         setChat((prev) => [
@@ -362,9 +383,9 @@ export function AgentDetail(): JSX.Element {
           </div>
         </header>
 
-        {sessionState !== "active" ? (
+        {sessionStateName !== "active" ? (
           <div className="flex-1 overflow-y-auto">
-            <SessionEndedView state={sessionState} />
+            <SessionEndedView state={sessionStateName} />
           </div>
         ) : (
           <ChatStream
@@ -378,7 +399,7 @@ export function AgentDetail(): JSX.Element {
         <form
           onSubmit={onSend}
           className={`border-t border-zinc-800 bg-zinc-900/40 px-4 py-3 sm:px-6 ${
-            sessionState !== "active" ? "hidden" : ""
+            sessionStateName !== "active" ? "hidden" : ""
           }`}
         >
           <div className="mb-2 flex items-center justify-between gap-2">

@@ -13,14 +13,22 @@ Two flavors of settings live here:
 
 from __future__ import annotations
 
+import atexit
+import contextlib
+import logging
+import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import get_args
 
 import bleach
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from studio_api.schemas import LLMProvider, LockedLLM
+
+logger = logging.getLogger(__name__)
 
 # Banner HTML is rendered with `dangerouslySetInnerHTML`. We accept only the
 # inline-formatting tags that make sense in a one-line announcement bar; any
@@ -79,10 +87,19 @@ class StudioSettings(BaseSettings):
     # --- Ephemeral / try-it-now deployment posture ---------------------------
     #
     # Ephemeral mode shapes a single-visitor demo box: studio.json is never
-    # written, the SDK is pointed at a per-process tmp data dir, FirstRun is
-    # skipped (env keys must be set), and the SPA hides Settings + any
-    # Save/Export/Download affordances. Combine with `session_ttl_minutes`
-    # and/or `token_cap_per_session` to bound a session.
+    # written, FirstRun is skipped (env keys must be set), and the SPA hides
+    # Settings + any agent-CRUD affordances. When the operator did not set
+    # ``WISDOM_STUDIO_DATA_DIR`` explicitly, ``data_dir`` is also rewritten to
+    # a per-process tmp directory (``tempfile.mkdtemp``) so the SDK SQLite is
+    # isolated by construction even if a forker mounts a shared volume across
+    # containers in less-segregated orchestrators (Docker bind mounts, k8s
+    # ReadWriteMany PVCs). An atexit handler removes that tmp directory on
+    # clean shutdown — operators of long-lived containers that get restarted
+    # in place should still treat ephemeral instances as disposable. An
+    # explicit ``WISDOM_STUDIO_DATA_DIR`` is always respected — operators
+    # opting into a known shared path are trusted to know what they're doing.
+    # Combine with ``session_ttl_minutes`` and/or ``token_cap_per_session`` to
+    # bound a session.
     ephemeral: bool = Field(default=False)
     # Hard cap on total LLM tokens (input + output) per session before the
     # backend returns 410 and the SPA renders the session-ended view. Counts
@@ -124,6 +141,37 @@ class StudioSettings(BaseSettings):
     wisdom_layer_license: str | None = Field(
         default=None, validation_alias=AliasChoices("WISDOM_LAYER_LICENSE")
     )
+
+    @model_validator(mode="after")
+    def _ephemeral_isolates_data_dir(self) -> StudioSettings:
+        """Swap ``data_dir`` to a per-process tmp directory in ephemeral mode.
+
+        Fires only when the operator did NOT set ``WISDOM_STUDIO_DATA_DIR``
+        explicitly — an explicit path is always honored, on the assumption
+        that the operator who set it knows it's safe (or unsafe) for their
+        orchestration model.
+
+        The tmp directory is registered for cleanup via ``atexit`` so a
+        graceful shutdown doesn't leave it on disk. Long-lived containers
+        that get restarted in place will accumulate one entry per restart —
+        operators of those should treat ephemeral instances as disposable
+        (spawn fresh, don't restart).
+        """
+        if not self.ephemeral:
+            return self
+        explicit = os.environ.get("WISDOM_STUDIO_DATA_DIR", "").strip()
+        if explicit:
+            return self
+        tmp_dir = Path(tempfile.mkdtemp(prefix="wisdom-studio-ephemeral-"))
+        # Pydantic v2 lets us mutate post-validation. The override propagates
+        # through the ``agents_dir`` / ``config_path`` properties below.
+        object.__setattr__(self, "data_dir", tmp_dir)
+        atexit.register(_cleanup_ephemeral_dir, tmp_dir)
+        logger.info(
+            "studio.settings.ephemeral_data_dir",
+            extra={"data_dir": str(tmp_dir)},
+        )
+        return self
 
     @field_validator("signup_url", "docs_url", "session_end_cta_href", "session_end_cta_label")
     @classmethod
@@ -197,6 +245,17 @@ class StudioSettings(BaseSettings):
         if provider not in get_args(LLMProvider):
             return None
         return LockedLLM(provider=provider, model=model)  # type: ignore[arg-type]
+
+
+def _cleanup_ephemeral_dir(path: Path) -> None:
+    """Best-effort removal of the tmp data dir registered at boot.
+
+    Failures are silent — atexit handlers run during interpreter teardown
+    where logging may already be torn down, and a stale tmp dir is harmless
+    compared to a noisy traceback at exit.
+    """
+    with contextlib.suppress(Exception):
+        shutil.rmtree(path, ignore_errors=True)
 
 
 settings = StudioSettings()
