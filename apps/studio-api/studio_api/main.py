@@ -456,21 +456,23 @@ async def cognition_socket(websocket: WebSocket, agent_id: str) -> None:
     Messages arrive as JSON arrays of ``{"type", "timestamp", "data"}`` events
     (the SDK hub batches events on a 100 ms flush interval).
 
-    Any failure during session boot (missing provider key, license init
-    failure, SDK adapter import error) is caught and reported as a clean
-    application close code with a human-readable reason. Without this,
-    uncaught exceptions surface to the client as an opaque "WebSocket
-    connection failed" with no diagnostic, leaving forkers stuck.
+    Handshake order matters: ``websocket.accept()`` is called *before*
+    ``session_manager.get_or_create``. Cold session boot does license
+    validation, SQLite init, and a sentence-transformers cold load that can
+    take several seconds — long enough for the browser/proxy to give up and
+    surface ``connection rejected (400 Bad Request)``. Accepting first
+    completes the WS upgrade immediately; any failure during boot is then
+    reported as a clean application close code (4404 / 4500) with a
+    human-readable reason.
     """
+    await websocket.accept()
     try:
         session = await session_manager.get_or_create(agent_id)
     except KeyError:
-        await websocket.accept()
         await websocket.close(code=4404, reason=f"agent not found: {agent_id}")
         return
     except Exception as exc:  # noqa: BLE001 — surface every boot failure
         logger.exception("studio.ws.session_boot_failed", extra={"agent_id": agent_id})
-        await websocket.accept()
         # WS close-reason is capped at 123 bytes; truncate the message so we
         # never produce an invalid frame.
         reason = f"session boot failed: {exc}"[:120]
@@ -481,7 +483,12 @@ async def cognition_socket(websocket: WebSocket, agent_id: str) -> None:
     # idempotent — bouncing the WebSocket can't reset a visitor's countdown.
     await session.mark_started()
 
-    await session.hub.connect(websocket)
+    # We've already accepted the socket above, so we can't call
+    # ``session.hub.connect(ws)`` (the SDK hub does its own ``ws.accept()``
+    # which would raise on a second call). Register directly on the hub's
+    # client set instead. The hub's ``disconnect`` is symmetric and only
+    # discards from this set, so cleanup remains correct.
+    session.hub._clients.add(websocket)
     try:
         while True:
             await websocket.receive_text()

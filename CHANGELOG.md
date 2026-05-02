@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-02
+
+### Added
+
+- **Insights tab on the agent page.** A third side-pane tab next to
+  Cognition / Memories surfaces the four SDK-driven cognitive surfaces
+  that previously required a separate `wisdom-layer-dashboard` process:
+  - **Directives** — active rule list with status / usage counts, plus a
+    pending-proposals queue with one-click approve / reject. Refreshes
+    automatically when `directive.*` or `dream.cycle.completed` events
+    arrive on the cognition WebSocket.
+  - **Journals** — reverse-chronological dream-cycle journal entries with
+    expand-to-read-full bodies and per-entry memory counts.
+  - **Dreams** — schedule status (last run / next run), recent cycle
+    history with reconsolidation / insight / proposal counts, plus token
+    and USD totals when the SDK's cost ledger has populated them.
+  - **Critic** — directive-entropy snapshot (healthy / elevated / high /
+    critical) and an on-demand audit runner that surfaces consistency,
+    drift, adherence, and self-correction scores plus any flagged
+    findings.
+
+  All four panels read directly from the per-agent SDK sub-app at
+  `/agents/{id}/api/*` (already mounted by `studio_api/sdk_mount.py`) —
+  no new backend routes. New TypeScript schema mirrors live in
+  `apps/studio-web/src/types/sdk.ts` (hand-written from
+  `wisdom_layer.types`); new API client methods in `lib/api.ts`. Visual
+  conventions match the existing event-color palette: amber for
+  directives, sky for journals, violet for dreams, rose for critic.
+
+- **Cognition WebSocket auto-reconnect with bounded backoff.** Transient
+  transport-level closes (network blips, backend restarts under deploy,
+  cellular handoff) now trigger an automatic reconnect cycle —
+  250ms / 500ms / 1s / 2s / 5s, capped at five attempts. Intentional
+  closes (code `1000` from cleanup, `4xxx` application codes from the
+  backend) are respected and don't retry. After the budget exhausts, the
+  cognition pane surfaces a "Connection lost — Reconnect" banner so the
+  visitor can restart the loop with one click. Useful for any deployment,
+  not just the hosted demo: forkers on flaky home wifi or behind
+  corporate proxies get the same recovery path.
+
+### Fixed
+
+- **Cognition WebSocket no longer drops on cold session boot.** The
+  `/ws/cognition/{agent_id}` handler called `session_manager.get_or_create`
+  *before* `websocket.accept()`. First-touch session boot can take several
+  seconds (license validation + SQLite init + sentence-transformers cold
+  load), and many browsers / proxies abandoned the WS upgrade with
+  `connection rejected (400 Bad Request)` before accept fired. The handler
+  now accepts the socket first, then runs `get_or_create`, surfacing any
+  boot failure as a clean application close code (`4404` for unknown agent,
+  `4500` for boot exceptions). Forkers no longer see the cognition pane and
+  memory minimap render permanently dark on a fresh `make dev`.
+- **Chat state no longer bleeds across agents.** Switching from agent A to
+  agent B carried A's chat transcript into B's composer. Because the
+  composer threads recent turns back to the SDK as grounding context,
+  details from A's conversation could end up captured into B's *memory*
+  store via the SDK's fact-extractor. (Memory itself is correctly isolated
+  per-agent — separate SQLite files — the bleed was purely a frontend
+  state issue.) `AgentDetail` now resets chat, draft, tier-error, and
+  memory-search state whenever `agentId` changes.
+- **Vite dev server no longer 404s on hard reload of `/agents/<id>`.** The
+  `/agents` proxy block forwarded *every* `/agents/*` request to the
+  backend, which only mounts per-agent SDK sub-apps lazily under
+  `/agents/<id>/...` on first use. Hard-reloading the SPA's
+  `/agents/coding-assistant` route therefore returned `{"detail":"Not
+  Found"}` from FastAPI. The proxy now bypasses HTML navigations (Accept:
+  text/html) to `/index.html` while still proxying SDK XHR / fetch calls
+  (Accept: application/json) through to the backend.
+
 ## [0.7.3] - 2026-05-01
 
 ### Fixed
@@ -368,7 +437,8 @@ Initial public release. Apache-2.0.
   (per-user persistence) so a single image can serve many bind-mounted data
   directories without rebuilding.
 
-[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.0...v0.7.1

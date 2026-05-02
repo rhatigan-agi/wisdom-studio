@@ -131,3 +131,69 @@ describe("api request wrapper", () => {
     await expect(api.chat("demo", "x")).rejects.not.toBeInstanceOf(SessionStateError);
   });
 });
+
+// Insights surface — exercises the new SDK dashboard route wrappers added
+// for the Insights tab. Each test pins the request URL so route drift in
+// `lib/api.ts` (e.g., a stray slash or wrong base) breaks loudly.
+describe("api insights surface", () => {
+  function captureFetch(body: unknown): { calls: { url: string; init?: RequestInit }[] } {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    globalThis.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    return { calls };
+  }
+
+  it("listDirectives hits the per-agent SDK route with include_inactive", async () => {
+    const { calls } = captureFetch([]);
+    await api.listDirectives("a1", true);
+    expect(calls[0].url).toBe("/agents/a1/api/directives?include_inactive=true");
+  });
+
+  it("listProposals hits the pending route", async () => {
+    const { calls } = captureFetch([]);
+    await api.listProposals("a1");
+    expect(calls[0].url).toBe("/agents/a1/api/directives/proposals/pending");
+  });
+
+  it("approveProposal POSTs to the approve route", async () => {
+    const { calls } = captureFetch({ ok: true });
+    await api.approveProposal("a1", "p1");
+    expect(calls[0].url).toBe("/agents/a1/api/directives/proposals/p1/approve");
+    expect(calls[0].init?.method).toBe("POST");
+  });
+
+  it("rejectProposal POSTs reason as JSON body", async () => {
+    const { calls } = captureFetch({});
+    await api.rejectProposal("a1", "p1", "noisy");
+    expect(calls[0].url).toBe("/agents/a1/api/directives/proposals/p1/reject");
+    expect(calls[0].init?.method).toBe("POST");
+    expect(calls[0].init?.body).toBe(JSON.stringify({ reason: "noisy" }));
+  });
+
+  it("listJournals threads the limit param", async () => {
+    const { calls } = captureFetch([]);
+    await api.listJournals("a1", 5);
+    expect(calls[0].url).toBe("/agents/a1/api/journals?limit=5");
+  });
+
+  it("dreamScheduleStatus / dreamHistory hit the dreams routes", async () => {
+    const { calls } = captureFetch({});
+    await api.dreamScheduleStatus("a1");
+    await api.dreamHistory("a1", 3);
+    expect(calls[0].url).toBe("/agents/a1/api/dreams/schedule/status");
+    expect(calls[1].url).toBe("/agents/a1/api/dreams/history?limit=3");
+  });
+
+  it("runCriticAudit / criticEntropy hit the critic routes", async () => {
+    const { calls } = captureFetch({});
+    await api.runCriticAudit("a1");
+    await api.criticEntropy("a1");
+    expect(calls[0].url).toBe("/agents/a1/api/critic/audits");
+    expect(calls[1].url).toBe("/agents/a1/api/critic/entropy");
+  });
+});

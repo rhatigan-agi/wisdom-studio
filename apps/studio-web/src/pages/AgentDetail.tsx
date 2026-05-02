@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Activity, ChevronDown, ChevronRight, Database, Sparkles, Send, Trash, Trash2, Lock, X, PanelRightOpen, Layers } from "lucide-react";
+import { Activity, ChevronDown, ChevronRight, Database, Lightbulb, Sparkles, Send, Trash, Trash2, Lock, X, PanelRightOpen, Layers } from "lucide-react";
 import { SessionStateError, TierError, api } from "../lib/api";
 import { useStudio } from "../lib/store";
 import { SESSION_EXPIRED_EVENT } from "../components/kiosk/SessionTimer";
@@ -8,6 +8,10 @@ import { SessionEndedView } from "../components/kiosk/SessionEndedView";
 import { ChatMarkdown } from "../components/ChatMarkdown";
 import { MemoryMapOverlay } from "../components/MemoryMapOverlay";
 import { useMemoryMap } from "../components/useMemoryMap";
+import { DirectivesPanel } from "../components/insights/Directives";
+import { JournalsPanel } from "../components/insights/Journals";
+import { DreamsPanel } from "../components/insights/Dreams";
+import { CriticPanel } from "../components/insights/Critic";
 import type {
   AgentDetail as AgentDetailType,
   ChatCompareResponse,
@@ -15,7 +19,8 @@ import type {
   CognitionEvent,
 } from "../types/api";
 
-type SidePane = "cognition" | "memories";
+type SidePane = "cognition" | "memories" | "insights";
+type InsightsTab = "directives" | "journals" | "dreams" | "critic";
 
 interface MemorySearchHit {
   id?: string;
@@ -83,7 +88,21 @@ function writeDreamHintFlag(ephemeral: boolean): void {
   }
 }
 
-type WsState = "idle" | "connecting" | "live" | "closed";
+type WsState = "idle" | "connecting" | "live" | "closed" | "reconnecting" | "lost";
+
+// Backoff schedule for the cognition WebSocket reconnect loop. Bounded to
+// five attempts (~9s total) so a permanently-down backend can't burn a
+// visitor's tab in an infinite reconnect loop. Manual retry from the "lost"
+// banner resets the counter.
+const WS_BACKOFF_MS = [250, 500, 1000, 2000, 5000] as const;
+
+// Close codes that signal an *intentional* close — never reconnect.
+//  1000     = normal closure (component unmount, browser nav, our cleanup)
+//  4000-4999 = application close from the backend (4404 unknown agent,
+//              4500 boot failed). Retrying would just spam the server.
+function isIntentionalClose(code: number): boolean {
+  return code === 1000 || (code >= 4000 && code < 5000);
+}
 
 export function AgentDetail(): JSX.Element {
   const { agentId = "" } = useParams<{ agentId: string }>();
@@ -105,6 +124,7 @@ export function AgentDetail(): JSX.Element {
   const clearCognition = useStudio((s) => s.clearCognition);
 
   const [sidePane, setSidePane] = useState<SidePane>("cognition");
+  const [insightsTab, setInsightsTab] = useState<InsightsTab>("directives");
   const [memoryQuery, setMemoryQuery] = useState("");
   const [memories, setMemories] = useState<MemorySearchHit[]>([]);
   const [memoriesLoading, setMemoriesLoading] = useState(false);
@@ -117,6 +137,10 @@ export function AgentDetail(): JSX.Element {
   const [paneOpen, setPaneOpen] = useState(false);
 
   const [wsState, setWsState] = useState<WsState>("idle");
+  // Bumped by the "Reconnect" button in the lost-connection banner. The WS
+  // effect depends on this, so incrementing it tears down any current
+  // socket + retry timer and starts a fresh connect cycle from attempt 0.
+  const [wsConnectKey, setWsConnectKey] = useState(0);
 
   // Memory map: dedup'd union of seed-probe results and live captures from
   // the cognition stream. Rendered as a floating bottom-right overlay
@@ -153,6 +177,22 @@ export function AgentDetail(): JSX.Element {
   const userMessageCount = chat.filter((l) => l.role === "user").length;
   const showDreamHint =
     !dreamHintDismissed && userMessageCount >= 2 && !dreaming && sessionStateName === "active";
+
+  // Per-agent UI state must reset when the route changes. Without this,
+  // switching from agent A to agent B carries A's chat history into B's
+  // composer — and because we thread prior turns back to the SDK as
+  // grounding context, B will capture facts from A's conversation into
+  // *B's* memory store. Memory itself is correctly isolated per-agent
+  // (separate SQLite files); the bleed is purely a frontend state issue.
+  // Memory-search results are also agent-scoped, so reset those too.
+  useEffect(() => {
+    setChat([]);
+    setTierError(null);
+    setMemories([]);
+    setMemoryQuery("");
+    setMemoriesError(null);
+    setDraft("");
+  }, [agentId]);
 
   useEffect(() => {
     if (!agentId || !sessionGated) {
@@ -211,72 +251,110 @@ export function AgentDetail(): JSX.Element {
     return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
   }, [navigate]);
 
-  // Owned WebSocket lifecycle. Vanilla WebSocket so we control connect/close
-  // exactly — third-party hooks were tearing the socket down on unrelated
-  // re-renders. SDK WebSocketHub batches events on a 100 ms flush interval
-  // and sends them as a JSON array per message; each event has shape
-  // `{type, timestamp, data}`.
+  // Owned WebSocket lifecycle with bounded auto-reconnect. Vanilla
+  // WebSocket so we control connect/close exactly — third-party hooks were
+  // tearing the socket down on unrelated re-renders. SDK WebSocketHub
+  // batches events on a 100 ms flush interval and sends them as a JSON
+  // array per message; each event has shape `{type, timestamp, data}`.
+  //
+  // Reconnect policy: transient transport-level closes (network blips,
+  // backend restarts under deploy) trigger backoff retries. Intentional
+  // closes — code 1000 (cleanup / browser nav) and the 4xxx app codes from
+  // `cognition_socket` — are respected and surface as a "closed" state
+  // with a manual retry option. After WS_BACKOFF_MS exhausts we go to
+  // "lost", and the banner's Reconnect button bumps `wsConnectKey` to
+  // reset the cycle.
   //
   // React 18 StrictMode runs effect → cleanup → effect on every mount in
   // dev. The first cleanup closes a still-CONNECTING socket, which the
-  // browser surfaces as an "error" event AND a "close" event. We must
-  // suppress both on the cleaned-up socket, otherwise the stale error/close
-  // can race the second socket's `open` and clobber wsState back to
-  // "closed" — which then keeps the cognition pane and the memory-map seed
-  // probe (which gates on `wsState === "live"`) permanently dark.
+  // browser surfaces as a "close" event. The `closedByCleanup` flag
+  // suppresses any state transitions from that stale socket so it can't
+  // race the second socket's `open` and flip wsState back to "closed".
   useEffect(() => {
     if (!agentId) return;
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     const url = `${proto}://${window.location.host}/ws/cognition/${agentId}`;
+
     let closedByCleanup = false;
-    setWsState("connecting");
-    const ws = new WebSocket(url);
-    ws.onopen = (): void => {
-      if (closedByCleanup) return;
-      setWsState("live");
+    let ws: WebSocket | null = null;
+    let retryTimer: number | null = null;
+    let retryCount = 0;
+
+    const connect = (): void => {
+      setWsState(retryCount === 0 ? "connecting" : "reconnecting");
+      const socket = new WebSocket(url);
+      ws = socket;
+      socket.onopen = (): void => {
+        if (closedByCleanup) return;
+        retryCount = 0;
+        setWsState("live");
+      };
+      socket.onclose = (event: CloseEvent): void => {
+        if (closedByCleanup) return;
+        if (isIntentionalClose(event.code)) {
+          setWsState("closed");
+          return;
+        }
+        if (retryCount >= WS_BACKOFF_MS.length) {
+          setWsState("lost");
+          return;
+        }
+        const delay = WS_BACKOFF_MS[retryCount];
+        retryCount += 1;
+        setWsState("reconnecting");
+        retryTimer = window.setTimeout(() => {
+          retryTimer = null;
+          if (!closedByCleanup) connect();
+        }, delay);
+      };
+      socket.onerror = (): void => {
+        // Do not transition state here — `onerror` always fires before
+        // `onclose`, and `onclose` carries the close code we need to
+        // decide between "closed", "reconnecting", or "lost".
+      };
+      socket.onmessage = (event: MessageEvent<string>): void => {
+        if (closedByCleanup) return;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+        const batch = Array.isArray(parsed) ? parsed : [parsed];
+        const events: CognitionEvent[] = batch.map((raw) => {
+          const r = raw as { type: string; timestamp: string; data?: Record<string, unknown> };
+          return {
+            agent_id: agentId,
+            type: r.type,
+            timestamp: r.timestamp,
+            data: r.data ?? {},
+          };
+        });
+        appendCognitionBatch(agentId, events);
+      };
     };
-    ws.onclose = (): void => {
-      if (closedByCleanup) return;
-      setWsState("closed");
-    };
-    ws.onerror = (): void => {
-      if (closedByCleanup) return;
-      setWsState("closed");
-    };
-    ws.onmessage = (event: MessageEvent<string>): void => {
-      if (closedByCleanup) return;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(event.data);
-      } catch {
-        return;
-      }
-      const batch = Array.isArray(parsed) ? parsed : [parsed];
-      const events: CognitionEvent[] = batch.map((raw) => {
-        const r = raw as { type: string; timestamp: string; data?: Record<string, unknown> };
-        return {
-          agent_id: agentId,
-          type: r.type,
-          timestamp: r.timestamp,
-          data: r.data ?? {},
-        };
-      });
-      appendCognitionBatch(agentId, events);
-    };
+
+    connect();
+
     return () => {
       closedByCleanup = true;
-      // Detach handlers BEFORE close so any error/close fired by the close
-      // itself can't reach the (now-stale) closure. Setting to no-op is
-      // safer than `null` because some browsers re-fire on null assignment.
-      ws.onopen = null;
-      ws.onclose = null;
-      ws.onerror = null;
-      ws.onmessage = null;
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close();
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      if (ws) {
+        // Detach handlers BEFORE close so any error/close fired by the
+        // close itself can't reach the (now-stale) closure.
+        ws.onopen = null;
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.onmessage = null;
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close();
+        }
       }
     };
-  }, [agentId, appendCognitionBatch]);
+  }, [agentId, appendCognitionBatch, wsConnectKey]);
 
   const sendMessage = async (message: string): Promise<void> => {
     if (!message || sending) return;
@@ -429,6 +507,12 @@ export function AgentDetail(): JSX.Element {
             icon={<Database className="h-3.5 w-3.5" />}
             label="Memories"
           />
+          <PaneTab
+            active={sidePane === "insights"}
+            onClick={() => setSidePane("insights")}
+            icon={<Lightbulb className="h-3.5 w-3.5" />}
+            label="Insights"
+          />
         </div>
         <div className="flex items-center gap-1">
           {sidePane === "cognition" && (
@@ -451,7 +535,17 @@ export function AgentDetail(): JSX.Element {
           </button>
         </div>
       </header>
-      {sidePane === "cognition" && <CognitionStream events={cognition} />}
+      {sidePane === "cognition" && (
+        <>
+          {(wsState === "lost" || wsState === "closed") && (
+            <WsReconnectBanner
+              state={wsState}
+              onRetry={() => setWsConnectKey((k) => k + 1)}
+            />
+          )}
+          <CognitionStream events={cognition} />
+        </>
+      )}
       {sidePane === "memories" && (
         <MemoryBrowser
           query={memoryQuery}
@@ -460,6 +554,14 @@ export function AgentDetail(): JSX.Element {
           loading={memoriesLoading}
           error={memoriesError}
           memories={memories}
+        />
+      )}
+      {sidePane === "insights" && (
+        <InsightsPane
+          agentId={agentId}
+          tab={insightsTab}
+          setTab={setInsightsTab}
+          cognition={cognition}
         />
       )}
     </>
@@ -918,6 +1020,33 @@ function CompareColumn(props: {
   );
 }
 
+// Inline notice for the cognition pane when the WS is closed or has
+// exhausted its auto-reconnect budget. "lost" indicates the auto-retry
+// loop gave up after WS_BACKOFF_MS attempts; "closed" means the backend
+// closed with an intentional code (4404 / 4500 / 1000) and we deliberately
+// did not retry. Either way the visitor gets a single-click recovery path.
+function WsReconnectBanner(props: {
+  state: Extract<WsState, "lost" | "closed">;
+  onRetry: () => void;
+}): JSX.Element {
+  const message =
+    props.state === "lost"
+      ? "Connection lost. Cognition events paused."
+      : "Connection closed by the server.";
+  return (
+    <div className="flex items-center justify-between gap-2 border-b border-amber-700/40 bg-amber-900/10 px-3 py-2 text-[11px] text-amber-200">
+      <span>{message}</span>
+      <button
+        type="button"
+        onClick={props.onRetry}
+        className="rounded border border-amber-700/60 bg-amber-900/20 px-2 py-0.5 text-amber-100 hover:bg-amber-900/40"
+      >
+        Reconnect
+      </button>
+    </div>
+  );
+}
+
 function CognitionStream(props: { events: CognitionEvent[] }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -1022,6 +1151,57 @@ function MemoryBrowser(props: {
             </li>
           ))}
         </ul>
+      </div>
+    </div>
+  );
+}
+
+// Insights pane: thin wrapper that owns the sub-tab nav and dispatches to
+// one of four panel components. Each panel fetches its own data from the
+// SDK dashboard routes mounted at /agents/{id}/api/*. Cognition is threaded
+// through so panels can refresh when relevant events arrive on the WS
+// (e.g., a new journal after a dream cycle completes).
+function InsightsPane(props: {
+  agentId: string;
+  tab: InsightsTab;
+  setTab: (tab: InsightsTab) => void;
+  cognition: CognitionEvent[];
+}): JSX.Element {
+  const tabs: { id: InsightsTab; label: string }[] = [
+    { id: "directives", label: "Directives" },
+    { id: "journals", label: "Journals" },
+    { id: "dreams", label: "Dreams" },
+    { id: "critic", label: "Critic" },
+  ];
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <nav className="flex border-b border-zinc-800 bg-zinc-950/40 px-2">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => props.setTab(t.id)}
+            className={`px-3 py-1.5 text-[11px] uppercase tracking-wider transition ${
+              props.tab === t.id
+                ? "border-b-2 border-emerald-500 text-zinc-100"
+                : "text-zinc-500 hover:text-zinc-200"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+      <div className="min-h-0 flex-1">
+        {props.tab === "directives" && (
+          <DirectivesPanel agentId={props.agentId} cognition={props.cognition} />
+        )}
+        {props.tab === "journals" && (
+          <JournalsPanel agentId={props.agentId} cognition={props.cognition} />
+        )}
+        {props.tab === "dreams" && (
+          <DreamsPanel agentId={props.agentId} cognition={props.cognition} />
+        )}
+        {props.tab === "critic" && <CriticPanel agentId={props.agentId} />}
       </div>
     </div>
   );

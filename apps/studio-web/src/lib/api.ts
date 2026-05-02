@@ -15,6 +15,15 @@ import type {
   StudioConfig,
   StudioConfigUpdate,
 } from "../types/api";
+import type {
+  AuditReport,
+  Directive,
+  DirectiveProposal,
+  DreamReport,
+  DreamScheduleStatus,
+  EntropySnapshot,
+  JournalEntry,
+} from "../types/sdk";
 
 // Cap kinds mirror `wisdom_layer.errors.CapKind` (SDK 1.1.0). Keep these in
 // sync with the backend handler in `studio_api/main.py::handle_tier_restriction`.
@@ -216,8 +225,40 @@ export const api = {
   triggerDream: (id: string): Promise<Record<string, unknown>> =>
     request(`${sdk(id)}/dreams/trigger`, { method: "POST" }),
 
-  listDirectives: (id: string, includeInactive = false): Promise<Array<Record<string, unknown>>> =>
+  // --- Insights surface (directives / journals / dreams / critic) ----------
+  // All four read straight off the SDK's per-agent dashboard routes mounted
+  // under /agents/{id}/api/. The Insights tab in AgentDetail consumes these.
+
+  listDirectives: (id: string, includeInactive = false): Promise<Directive[]> =>
     request(`${sdk(id)}/directives?include_inactive=${includeInactive}`),
+
+  listProposals: (id: string): Promise<DirectiveProposal[]> =>
+    request(`${sdk(id)}/directives/proposals/pending`),
+
+  approveProposal: (id: string, proposalId: string): Promise<Record<string, unknown>> =>
+    request(`${sdk(id)}/directives/proposals/${proposalId}/approve`, { method: "POST" }),
+
+  rejectProposal: (id: string, proposalId: string, reason = ""): Promise<void> =>
+    request(`${sdk(id)}/directives/proposals/${proposalId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
+
+  listJournals: (id: string, limit = 20): Promise<JournalEntry[]> =>
+    request(`${sdk(id)}/journals?limit=${limit}`),
+
+  dreamScheduleStatus: (id: string): Promise<DreamScheduleStatus> =>
+    request(`${sdk(id)}/dreams/schedule/status`),
+
+  dreamHistory: (id: string, limit = 10): Promise<DreamReport[]> =>
+    request(`${sdk(id)}/dreams/history?limit=${limit}`),
+
+  // The audits route runs an audit synchronously — caller should treat it as
+  // a button-triggered action, not a passive read. May take several seconds.
+  runCriticAudit: (id: string): Promise<AuditReport> =>
+    request(`${sdk(id)}/critic/audits`),
+
+  criticEntropy: (id: string): Promise<EntropySnapshot> => request(`${sdk(id)}/critic/entropy`),
 
   getStatus: (id: string): Promise<Record<string, unknown>> => request(`${sdk(id)}/status`),
 
