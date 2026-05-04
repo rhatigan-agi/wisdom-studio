@@ -54,6 +54,9 @@ updates:
       # Studio targets Node LTS only — odd-numbered Node majors are not LTS.
       - dependency-name: "node"
         versions: ["21.x", "23.x", "25.x", "27.x"]
+      # Python upgrades require manual ecosystem compatibility verification
+      # (sentence-transformers, pydantic, fastapi). Tracked in issue #15.
+      - dependency-name: "python"
     groups:
       docker-minor-patch:
         patterns: ["*"]
