@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-05-03
+
+Security and dependency maintenance. No user-facing behavior changes —
+this release only updates build-time and CI tooling to clear two
+moderate-severity advisories transitively pulled in by Vite 5 and
+Vitest 2.
+
+### Security
+
+- **Vite 5 → 6.4.2** (clears [GHSA-4w7w-66w2-5vf9](https://github.com/advisories/GHSA-4w7w-66w2-5vf9) — path traversal in optimized-deps `.map` handling).
+- **esbuild upgraded transitively to ≥ 0.25.0** (clears [GHSA-67mh-4wv8-2f99](https://github.com/advisories/GHSA-67mh-4wv8-2f99) — dev-server allowed any origin to issue requests and read responses).
+- **Vitest 2 → 4** so the dev test runner pulls Vite 6 and esbuild ≥ 0.25 transitively. `pnpm audit` now reports zero vulnerabilities.
+
+### Changed
+
+- **Frontend dependencies** bumped via Dependabot's first sweep:
+  - `eslint-plugin-react-hooks` 5 → 7.1.1, `eslint-plugin-react-refresh` 0.4 → 0.5.2
+  - `jsdom` 25 → 29, `postcss` 8.5.12 → 8.5.13
+- **CI / GitHub Actions** all bumped to current majors and SHA-pinned:
+  - `actions/checkout` 4 → 6, `actions/setup-node` 4 → 6, `actions/upload-artifact` 4 → 7, `actions/download-artifact` 4 → 8
+  - `pnpm/action-setup` 4 → 6
+  - `docker/login-action` 3 → 4, `docker/metadata-action` 5 → 6, `docker/build-push-action` 5 → 7, `docker/setup-buildx-action` 3 → 4
+  - `github/codeql-action` 3 → 4
+- **Dependabot config** now groups minor/patch bumps into one PR per ecosystem per week (instead of one PR per dependency) and explicitly ignores non-LTS Node majors and Python upgrades — Python and major Node bumps require manual review (see #15).
+- **CodeQL workflow** skips on Dependabot PRs to avoid a known incompatibility between the CodeQL action's diff-range analyzer and Dependabot's restricted token. CodeQL still runs on every push to `main` and on the weekly schedule, so coverage is unchanged.
+
+### Notes
+
+- `react-hooks/set-state-in-effect` (new in eslint-plugin-react-hooks 7) is temporarily disabled in `eslint.config.js` — 19 existing call sites flag it. Cleanup is tracked in #15.
+- Four major-version bumps were deliberately deferred for a focused frontend modernization pass: TypeScript 6, React 19, lucide-react 1.x, and Python 3.14. See #15.
+
 ## [0.9.0] - 2026-05-03
 
 Multi-agent workspace surface for Wisdom Layer 1.2.0, plus
@@ -531,7 +562,8 @@ Initial public release. Apache-2.0.
   (per-user persistence) so a single image can serve many bind-mounted data
   directories without rebuilding.
 
-[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.2...v0.7.3

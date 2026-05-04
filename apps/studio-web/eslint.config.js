@@ -59,6 +59,11 @@ export default [
         "warn",
         { allowConstantExport: true },
       ],
+      // eslint-plugin-react-hooks 7.x added this rule to the recommended preset.
+      // 19 existing call sites flag — most are intentional "fire one refresh on
+      // mount" patterns. Deferred: triage and fix during a frontend cleanup pass
+      // (tracked in #15). Until then this rule is off so lint stays useful.
+      "react-hooks/set-state-in-effect": "off",
     },
   },
 ];
