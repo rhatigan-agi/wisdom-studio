@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-05-04
+
+Two small UI fixes for the multi-agent demo flow.
+
+### Fixed
+
+- **`TypeError: Cannot read properties of undefined (reading 'toFixed')` on the
+  Workspace tab.** `team_score` is omitted from the shared-memory row payload
+  when a memory has not yet received any endorse / contest votes. The renderer
+  now defaults to `0.00` rather than crashing the row
+  (`apps/studio-web/src/pages/Workspace.tsx`).
+- **Memory map overlay now refreshes after "Share to workspace".** The share
+  operation creates a new memory on the originating agent's backend but does
+  not emit a `memory.captured` cognition event, so the bottom-right
+  `MemoryMapOverlay` stayed stale until the next page load. `useMemoryMap`
+  now exposes a `refresh()` callback that re-probes the seed search; the
+  share button on each `MemoryRow` invokes it on success
+  (`apps/studio-web/src/components/useMemoryMap.ts`,
+  `apps/studio-web/src/pages/AgentDetail.tsx`).
+
 ## [0.9.1] - 2026-05-03
 
 Security and dependency maintenance. No user-facing behavior changes —
@@ -562,7 +582,8 @@ Initial public release. Apache-2.0.
   (per-user persistence) so a single image can serve many bind-mounted data
   directories without rebuilding.
 
-[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.3...v0.8.0

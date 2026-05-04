@@ -148,7 +148,11 @@ export function AgentDetail(): JSX.Element {
   // reports `live` before probing the SDK memory route — the per-agent
   // sub-app is mounted lazily by SessionManager and probing it earlier
   // 404s.
-  const mapNodes = useMemoryMap(agentId, cognition, wsState === "live");
+  const { nodes: mapNodes, refresh: refreshMemoryMap } = useMemoryMap(
+    agentId,
+    cognition,
+    wsState === "live",
+  );
 
   // Server-confirmed session lifecycle. Polled when the deployment configures
   // a TTL or token cap; otherwise stays null and the surface renders normally.
@@ -555,6 +559,7 @@ export function AgentDetail(): JSX.Element {
           loading={memoriesLoading}
           error={memoriesError}
           memories={memories}
+          onShared={refreshMemoryMap}
         />
       )}
       {sidePane === "insights" && (
@@ -1109,6 +1114,7 @@ function MemoryBrowser(props: {
   loading: boolean;
   error: string | null;
   memories: MemorySearchHit[];
+  onShared?: () => void | Promise<void>;
 }): JSX.Element {
   return (
     <div className="flex h-full flex-col">
@@ -1136,7 +1142,12 @@ function MemoryBrowser(props: {
         )}
         <ul className="space-y-1">
           {props.memories.map((mem, i) => (
-            <MemoryRow key={mem.id ?? i} agentId={props.agentId} mem={mem} />
+            <MemoryRow
+              key={mem.id ?? i}
+              agentId={props.agentId}
+              mem={mem}
+              onShared={props.onShared}
+            />
           ))}
         </ul>
       </div>
@@ -1147,7 +1158,11 @@ function MemoryBrowser(props: {
 // One memory row + the "Share to workspace" affordance. The share button is
 // always visible — when the workspace is unavailable the API call surfaces
 // the structured error and we render a one-line CTA inline.
-function MemoryRow(props: { agentId: string; mem: MemorySearchHit }): JSX.Element {
+function MemoryRow(props: {
+  agentId: string;
+  mem: MemorySearchHit;
+  onShared?: () => void | Promise<void>;
+}): JSX.Element {
   const { mem } = props;
   const [sharing, setSharing] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -1162,6 +1177,13 @@ function MemoryRow(props: { agentId: string; mem: MemorySearchHit }): JSX.Elemen
     try {
       const result = await api.shareMemory(props.agentId, mem.id, { visibility: "TEAM" });
       setStatus(`Shared as ${result.shared_memory_id}`);
+      // The shared copy lands as a new memory on this agent's backend, but
+      // the workspace op doesn't emit a `memory.captured` cognition event,
+      // so the memory map overlay won't see it via the WS bridge. Re-probe
+      // the seed search so the new node appears immediately.
+      if (props.onShared) {
+        await props.onShared();
+      }
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err));
     } finally {

@@ -337,7 +337,7 @@ function SharedMemoryCard(props: {
         </span>
         <span>
           team score:{" "}
-          <span className="font-mono text-zinc-200">{row.team_score.toFixed(2)}</span>
+          <span className="font-mono text-zinc-200">{(row.team_score ?? 0).toFixed(2)}</span>
         </span>
       </div>
 

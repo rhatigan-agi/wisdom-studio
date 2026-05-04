@@ -3,6 +3,9 @@
 # Copy to `fly.toml` (gitignored) and edit for your deployment, then:
 #   fly apps create <your-app-name>
 #   fly secrets set --app <your-app-name> ANTHROPIC_API_KEY=sk-... WISDOM_LAYER_LICENSE=wl_...
+#   # Provision one persistent volume per machine (see [mounts] below).
+#   # For min_machines_running = N, run this N times:
+#   fly volumes create wisdom_studio_data --size 1 --region <region> --app <your-app-name>
 #   fly deploy --app <your-app-name> --image ghcr.io/rhatigan-agi/wisdom-studio:latest
 #
 # DNS: point a subdomain (e.g. studio.example.com) at <your-app-name>.fly.dev
@@ -36,11 +39,19 @@ primary_region = "iad"       # pick the Fly region nearest your visitors
   # at 512 MB. Bump to "shared-cpu-2x" (2 GB) for heavier demo loads.
   memory = "1gb"
 
-# Persistent volume is OPTIONAL when WISDOM_STUDIO_EPHEMERAL=true (the demo
-# posture below). Uncomment if your fork persists agents across restarts.
-# [mounts]
-#   source = "wisdom_studio_data"
-#   destination = "/data"
+# Per-machine persistent volume mounted at /data. REQUIRED when the [env]
+# block below sets WISDOM_STUDIO_DATA_DIR=/data — without this mount, /data
+# is just a path in the ephemeral rootfs and every redeploy / secret rotation /
+# machine restart wipes the SQLite agent store + workspace.db. Note:
+# WISDOM_STUDIO_EPHEMERAL=true does NOT swap the data dir when DATA_DIR is set
+# explicitly (settings.py:189-193) — it gates other UI affordances.
+#
+# Fly volumes are 1:1 with machines — provision one per min_machines_running
+# (see deploy header above). Comment out only if you also unset
+# WISDOM_STUDIO_DATA_DIR below and accept ephemeral per-process tmp dirs.
+[mounts]
+  source = "wisdom_studio_data"
+  destination = "/data"
 
 # --- Non-secret env vars -----------------------------------------------------
 # Secrets (ANTHROPIC_API_KEY, WISDOM_LAYER_LICENSE, OPENAI_API_KEY, etc.)

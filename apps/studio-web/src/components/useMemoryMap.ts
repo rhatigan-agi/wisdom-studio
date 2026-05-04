@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import type { CognitionEvent, MemoryEntry } from "../types/api";
 import type { MemoryNode } from "./MemoryMap";
@@ -72,12 +72,35 @@ function dedupe(nodes: MemoryNode[]): MemoryNode[] {
   return Array.from(seen.values());
 }
 
+export interface MemoryMap {
+  nodes: MemoryNode[];
+  refresh: () => Promise<void>;
+}
+
 export function useMemoryMap(
   agentId: string,
   cognition: CognitionEvent[],
   ready: boolean,
-): MemoryNode[] {
+): MemoryMap {
   const [seeds, setSeeds] = useState<MemoryNode[]>([]);
+
+  const refresh = useCallback(async (): Promise<void> => {
+    if (!agentId || !ready) return;
+    try {
+      const result = await api.searchMemories(agentId, {
+        query: SEED_PROBE_QUERY,
+        limit: SEED_PROBE_LIMIT,
+      });
+      const nodes = result
+        .map((entry) => entryToNode(entry, "seed"))
+        .filter((n): n is MemoryNode => n !== null);
+      setSeeds(nodes);
+    } catch {
+      // Search can fail on tier-gated deployments or transient backend
+      // issues. We swallow it — the parent hides the tab when the node
+      // list is empty, so there's no visitor-visible failure.
+    }
+  }, [agentId, ready]);
 
   useEffect(() => {
     // The SDK dashboard sub-app at /agents/{id}/api/* is mounted lazily by
@@ -88,10 +111,6 @@ export function useMemoryMap(
     let cancelled = false;
     (async () => {
       try {
-        // Broad-probe semantic search. The query is generic; semantic
-        // search returns the `limit` nearest neighbors regardless, so for
-        // a small seeded agent this approximates "show what's there." On
-        // failure we leave seeds empty — live captures may still populate.
         const result = await api.searchMemories(agentId, {
           query: SEED_PROBE_QUERY,
           limit: SEED_PROBE_LIMIT,
@@ -102,9 +121,7 @@ export function useMemoryMap(
           .filter((n): n is MemoryNode => n !== null);
         setSeeds(nodes);
       } catch {
-        // Search can fail on tier-gated deployments or transient backend
-        // issues. We swallow it — the parent hides the tab when the node
-        // list is empty, so there's no visitor-visible failure.
+        // See refresh() — same swallow rationale.
       }
     })();
     return () => {
@@ -112,5 +129,9 @@ export function useMemoryMap(
     };
   }, [agentId, ready]);
 
-  return useMemo(() => dedupe([...seeds, ...liveNodesFrom(cognition)]), [seeds, cognition]);
+  const nodes = useMemo(
+    () => dedupe([...seeds, ...liveNodesFrom(cognition)]),
+    [seeds, cognition],
+  );
+  return { nodes, refresh };
 }
