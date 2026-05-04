@@ -12,11 +12,18 @@
 # Build:   docker build -t wisdom-studio .
 # Run:     docker run -p 3000:3000 -v studio-data:/data \
 #              -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY wisdom-studio
+#
+# Hardening notes (Scorecard / Pinned-Dependencies):
+#   - Base images pinned by sha256 digest, not floating tag.
+#   - `uv` brought in via digest-pinned `ghcr.io/astral-sh/uv` image,
+#     not `pip install uv` (which Scorecard flags as unpinned).
+#   - Re-pin every line below when refreshing dependencies; CI's
+#     docker-build job exercises this Dockerfile on every PR.
 
 # -----------------------------------------------------------------------------
 # Stage 1 — build the SPA
 # -----------------------------------------------------------------------------
-FROM node:20-alpine AS web-builder
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS web-builder
 
 WORKDIR /app
 RUN corepack enable
@@ -31,13 +38,16 @@ RUN pnpm build
 # -----------------------------------------------------------------------------
 # Stage 2 — install Python deps and the studio_api package
 # -----------------------------------------------------------------------------
-FROM python:3.12-slim AS api-builder
+FROM python:3.12-slim@sha256:46cb7cc2877e60fbd5e21a9ae6115c30ace7a077b9f8772da879e4590c18c2e3 AS api-builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-RUN pip install --no-cache-dir uv
+# Bring in `uv` from a digest-pinned image (matches the api/ Dockerfile in
+# wisdom-layer-core). This satisfies Scorecard's Pinned-Dependencies check,
+# which flags bare `pip install uv` as unpinned.
+COPY --from=ghcr.io/astral-sh/uv@sha256:3b7b60a81d3c57ef471703e5c83fd4aaa33abcd403596fb22ab07db85ae91347 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
@@ -58,7 +68,7 @@ RUN uv pip install --system --no-cache '.[all-adapters]'
 # -----------------------------------------------------------------------------
 # Stage 3 — runtime
 # -----------------------------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim@sha256:46cb7cc2877e60fbd5e21a9ae6115c30ace7a077b9f8772da879e4590c18c2e3 AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1

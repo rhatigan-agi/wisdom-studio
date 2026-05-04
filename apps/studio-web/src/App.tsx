@@ -8,6 +8,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { NewAgent } from "./pages/NewAgent";
 import { AgentDetail } from "./pages/AgentDetail";
 import { Settings } from "./pages/Settings";
+import { Workspace } from "./pages/Workspace";
 
 export default function App() {
   const setConfig = useStudio((s) => s.setConfig);
@@ -56,6 +57,7 @@ export default function App() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/new" element={<NewAgent />} />
         <Route path="/agents/:agentId" element={<AgentDetail />} />
+        <Route path="/workspace" element={<Workspace />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

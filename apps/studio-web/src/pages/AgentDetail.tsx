@@ -548,6 +548,7 @@ export function AgentDetail(): JSX.Element {
       )}
       {sidePane === "memories" && (
         <MemoryBrowser
+          agentId={agentId}
           query={memoryQuery}
           setQuery={setMemoryQuery}
           onSearch={onSearchMemories}
@@ -1101,6 +1102,7 @@ function PaneTab(props: {
 }
 
 function MemoryBrowser(props: {
+  agentId: string;
   query: string;
   setQuery: (q: string) => void;
   onSearch: (e: React.FormEvent) => void | Promise<void>;
@@ -1134,25 +1136,67 @@ function MemoryBrowser(props: {
         )}
         <ul className="space-y-1">
           {props.memories.map((mem, i) => (
-            <li
-              key={mem.id ?? i}
-              className="rounded border border-zinc-800 bg-zinc-950 px-2 py-1.5"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-emerald-300">{mem.event_type ?? "memory"}</span>
-                <span className="text-zinc-600">
-                  {mem.similarity !== undefined && `sim ${mem.similarity.toFixed(2)} · `}
-                  {mem.created_at ? formatTime(mem.created_at) : ""}
-                </span>
-              </div>
-              <pre className="mt-1 whitespace-pre-wrap break-all text-zinc-400">
-                {summarizeMemory(mem.content ?? {})}
-              </pre>
-            </li>
+            <MemoryRow key={mem.id ?? i} agentId={props.agentId} mem={mem} />
           ))}
         </ul>
       </div>
     </div>
+  );
+}
+
+// One memory row + the "Share to workspace" affordance. The share button is
+// always visible — when the workspace is unavailable the API call surfaces
+// the structured error and we render a one-line CTA inline.
+function MemoryRow(props: { agentId: string; mem: MemorySearchHit }): JSX.Element {
+  const { mem } = props;
+  const [sharing, setSharing] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  async function share(): Promise<void> {
+    if (!mem.id) {
+      setStatus("Cannot share: memory has no id.");
+      return;
+    }
+    setSharing(true);
+    setStatus(null);
+    try {
+      const result = await api.shareMemory(props.agentId, mem.id, { visibility: "TEAM" });
+      setStatus(`Shared as ${result.shared_memory_id}`);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSharing(false);
+    }
+  }
+
+  return (
+    <li className="rounded border border-zinc-800 bg-zinc-950 px-2 py-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-emerald-300">{mem.event_type ?? "memory"}</span>
+        <span className="text-zinc-600">
+          {mem.similarity !== undefined && `sim ${mem.similarity.toFixed(2)} · `}
+          {mem.created_at ? formatTime(mem.created_at) : ""}
+        </span>
+      </div>
+      <pre className="mt-1 whitespace-pre-wrap break-all text-zinc-400">
+        {summarizeMemory(mem.content ?? {})}
+      </pre>
+      <div className="mt-1 flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={share}
+          disabled={sharing || !mem.id}
+          className="rounded border border-emerald-700/40 bg-emerald-700/10 px-2 py-0.5 text-[10px] text-emerald-200 hover:bg-emerald-700/20 disabled:opacity-50"
+        >
+          {sharing ? "Sharing…" : "Share to workspace"}
+        </button>
+        {status && (
+          <span className="truncate text-[10px] text-zinc-500" title={status}>
+            {status}
+          </span>
+        )}
+      </div>
+    </li>
   );
 }
 

@@ -44,6 +44,7 @@ from studio_api.store import (
     load_studio_config,
     save_studio_config,
 )
+from studio_api.workspace import workspace_manager
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
     await session_manager.close_all()
+    await workspace_manager.close()
     logger.info("studio.api.stopped")
 
 
@@ -255,6 +257,455 @@ async def post_agent_from_example(slug: str) -> AgentDetail:
             }
         )
     return create_agent(spec)
+
+
+# --- Multi-agent workspace ---------------------------------------------------
+#
+# Surface for wisdom-layer 1.2.0+ multi-agent features (shared memory pool,
+# agent-to-agent messaging, team dreams). Initialization is lazy — the first
+# request to any of these routes (or the first agent boot) attempts
+# ``Workspace.initialize()``. License-tier failures are cached and surfaced
+# via ``GET /api/workspace/status`` so the SPA can render a CTA without
+# every per-agent boot retrying the same failure.
+
+
+def _resolve_license_key() -> str | None:
+    studio_config = load_studio_config()
+    return studio_config.license_key or settings.wisdom_layer_license
+
+
+@app.get("/api/workspace/status")
+async def get_workspace_status() -> dict[str, object]:
+    """Return whether multi-agent features are available and why not, if not."""
+    return await workspace_manager.status(_resolve_license_key())
+
+
+@app.get("/api/workspace/agents")
+async def get_workspace_agents() -> list[dict[str, object]]:
+    """Return the workspace agent directory.
+
+    Empty when the workspace is unavailable — the SPA can render the same
+    empty state without first checking ``/api/workspace/status``.
+    """
+    await workspace_manager.ensure_initialized(_resolve_license_key())
+    return await workspace_manager.list_agents()
+
+
+async def _require_workspace() -> object:
+    """Return the live :class:`Workspace` or raise 403 with the cached reason.
+
+    Routes that require multi-agent features call this so the SPA gets a
+    clean structured error (matching the same shape ``/api/workspace/status``
+    returns) instead of an opaque 500. Lazy-initializes on first call so a
+    fresh process boot does not require a status ping before any pool route
+    can succeed.
+    """
+    await workspace_manager.ensure_initialized(_resolve_license_key())
+    workspace = workspace_manager.workspace
+    if workspace is None:
+        unavail = workspace_manager.unavailable_reason
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "workspace_unavailable",
+                "reason": unavail.reason if unavail else "uninitialized",
+                "feature": unavail.feature if unavail else None,
+                "required_tier": unavail.required_tier if unavail else None,
+                "upgrade_url": unavail.upgrade_url if unavail else None,
+                "message": (
+                    unavail.message
+                    if unavail
+                    else "Workspace is not initialized."
+                ),
+            },
+        )
+    return workspace
+
+
+def _shared_memory_dict(row: object) -> dict[str, object]:
+    """Serialize a :class:`wisdom_layer.workspace.SharedMemory` for JSON.
+
+    Inlining the projection keeps Studio decoupled from the SDK dataclass
+    layout — if the SDK adds fields, Studio's response shape stays stable.
+    """
+    return {
+        "id": row.id,  # type: ignore[attr-defined]
+        "workspace_id": row.workspace_id,  # type: ignore[attr-defined]
+        "contributor_id": row.contributor_id,  # type: ignore[attr-defined]
+        "source_memory_id": row.source_memory_id,  # type: ignore[attr-defined]
+        "visibility": str(row.visibility),  # type: ignore[attr-defined]
+        "content": row.content,  # type: ignore[attr-defined]
+        "reason": row.reason,  # type: ignore[attr-defined]
+        "endorsement_count": row.endorsement_count,  # type: ignore[attr-defined]
+        "contention_count": row.contention_count,  # type: ignore[attr-defined]
+        "base_score": row.base_score,  # type: ignore[attr-defined]
+        "team_score": row.team_score,  # type: ignore[attr-defined]
+        "shared_at": row.shared_at.isoformat(),  # type: ignore[attr-defined]
+        "archived_at": (
+            row.archived_at.isoformat()  # type: ignore[attr-defined]
+            if row.archived_at  # type: ignore[attr-defined]
+            else None
+        ),
+    }
+
+
+def _team_insight_dict(row: object) -> dict[str, object]:
+    return {
+        "id": row.id,  # type: ignore[attr-defined]
+        "workspace_id": row.workspace_id,  # type: ignore[attr-defined]
+        "content": row.content,  # type: ignore[attr-defined]
+        "synthesis_prompt_hash": row.synthesis_prompt_hash,  # type: ignore[attr-defined]
+        "contributor_count": row.contributor_count,  # type: ignore[attr-defined]
+        "dream_cycle_id": row.dream_cycle_id,  # type: ignore[attr-defined]
+        "created_at": row.created_at.isoformat(),  # type: ignore[attr-defined]
+        "archived_at": (
+            row.archived_at.isoformat()  # type: ignore[attr-defined]
+            if row.archived_at  # type: ignore[attr-defined]
+            else None
+        ),
+    }
+
+
+# --- Shared memory pool ------------------------------------------------------
+
+
+@app.post("/api/agents/{agent_id}/memory/{memory_id}/share")
+async def share_memory(
+    agent_id: str,
+    memory_id: str,
+    body: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Promote one of an agent's memories into the workspace shared pool.
+
+    Calls ``agent.memory.share`` — the bridge enforces tenancy (the agent
+    can only share its own memories). Body is optional:
+    ``{ "visibility"?: "TEAM"|"PUBLIC", "reason"?: string }``.
+    """
+    await _require_workspace()
+
+    # Validate the request shape BEFORE any side effects (session creation,
+    # workspace mutation). PRIVATE is a contract violation, not a "not found"
+    # condition — surface 422 even if the agent_id happens to be unknown.
+    payload = body or {}
+    visibility_raw = payload.get("visibility", "TEAM")
+    reason = str(payload.get("reason", "") or "")
+
+    from wisdom_layer.workspace import Visibility
+
+    try:
+        visibility = Visibility(str(visibility_raw))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"invalid visibility: {exc}") from exc
+    if visibility is Visibility.PRIVATE:
+        raise HTTPException(status_code=422, detail="cannot share with PRIVATE visibility")
+
+    try:
+        session = await session_manager.get_or_create(agent_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    try:
+        shared_id = await session.agent.memory.share(
+            memory_id, visibility=visibility, reason=reason
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"shared_memory_id": shared_id}
+
+
+@app.get("/api/workspace/shared-memory")
+async def list_shared_memory(
+    contributor_id: str | None = None,
+    min_base_score: float | None = None,
+    limit: int = 100,
+) -> list[dict[str, object]]:
+    workspace = await _require_workspace()
+    rows = await workspace.pool.list(  # type: ignore[attr-defined]
+        contributor_id=contributor_id,
+        min_base_score=min_base_score,
+        limit=limit,
+    )
+    return [_shared_memory_dict(r) for r in rows]
+
+
+@app.post("/api/workspace/shared-memory/{shared_id}/endorse")
+async def endorse_shared_memory(shared_id: str, body: dict[str, object]) -> dict[str, object]:
+    workspace = await _require_workspace()
+    agent_id = str(body.get("agent_id", "") or "").strip()
+    if not agent_id:
+        raise HTTPException(status_code=422, detail="agent_id is required")
+    recorded = await workspace.pool.endorse(  # type: ignore[attr-defined]
+        shared_id, endorsing_agent_id=agent_id
+    )
+    return {"recorded": recorded}
+
+
+@app.post("/api/workspace/shared-memory/{shared_id}/contest")
+async def contest_shared_memory(shared_id: str, body: dict[str, object]) -> dict[str, object]:
+    workspace = await _require_workspace()
+    agent_id = str(body.get("agent_id", "") or "").strip()
+    reason = str(body.get("reason", "") or "").strip()
+    if not agent_id:
+        raise HTTPException(status_code=422, detail="agent_id is required")
+    if not reason:
+        raise HTTPException(status_code=422, detail="reason is required for a contest")
+    recorded = await workspace.pool.contest(  # type: ignore[attr-defined]
+        shared_id, contesting_agent_id=agent_id, reason=reason
+    )
+    return {"recorded": recorded}
+
+
+# --- Team insights + Team Dream ---------------------------------------------
+
+
+@app.get("/api/workspace/team-insights")
+async def list_team_insights(limit: int = 50) -> list[dict[str, object]]:
+    """Return synthesized team insights, newest-first.
+
+    Backed by a direct backend query because the SDK does not expose a
+    public ``pool.list_insights(...)`` method in v1.2.0 — the workspace
+    backend has the rows; we read them through it. Empty list when the
+    workspace is unavailable.
+    """
+    workspace = workspace_manager.workspace
+    if workspace is None:
+        return []
+    rows = await workspace.pool.list_team_insights(limit=limit)  # type: ignore[attr-defined]
+    return [_team_insight_dict(r) for r in rows]
+
+
+@app.post("/api/workspace/team-dream")
+async def run_team_dream(body: dict[str, object]) -> dict[str, object]:
+    """Run a Team Dream Phase-1 synthesis cycle.
+
+    Requires a designated synthesizer agent — the LLM call is made with
+    that agent's adapter, since the workspace itself has no LLM bound.
+    Body: ``{ "synthesizer_agent_id": str, "min_contributors"?: int }``.
+    """
+    workspace = await _require_workspace()
+    synthesizer_id = str(body.get("synthesizer_agent_id", "") or "").strip()
+    if not synthesizer_id:
+        raise HTTPException(status_code=422, detail="synthesizer_agent_id is required")
+    min_contributors = int(body.get("min_contributors", 2) or 2)
+
+    try:
+        session = await session_manager.get_or_create(synthesizer_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    insight = await workspace.team_synthesize(  # type: ignore[attr-defined]
+        synthesizer=session.agent,
+        min_contributors=min_contributors,
+    )
+    if insight is None:
+        return {
+            "synthesized": False,
+            "reason": "below_threshold",
+            "min_contributors": min_contributors,
+        }
+    return {"synthesized": True, "insight": _team_insight_dict(insight)}
+
+
+@app.get("/api/workspace/team-insights/{insight_id}/provenance")
+async def walk_team_insight_provenance(insight_id: str) -> dict[str, object]:
+    """Walk a team insight's contributor chain — the patent-defensible moat.
+
+    Returns the team insight, its contributing shared memories, and each
+    contributor's opaque ``source_memory_id`` back-pointer. The walk
+    deliberately never dereferences private content; only the contributing
+    agent itself can resolve those ids.
+    """
+    workspace = await _require_workspace()
+    try:
+        provenance = await workspace.pool.walk_provenance(insight_id)  # type: ignore[attr-defined]
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "team_insight": _team_insight_dict(provenance.team_insight),
+        "contributions": [
+            {
+                "shared_memory_id": c.shared_memory_id,
+                "contributor_agent_id": c.contributor_agent_id,
+                "source_memory_id": c.source_memory_id,
+                "shared_content": c.shared_content,
+                "contribution_weight": c.contribution_weight,
+            }
+            for c in provenance.contributions
+        ],
+    }
+
+
+# --- Agent-to-agent messaging (MessageBus) ----------------------------------
+
+
+def _message_dict(msg: object) -> dict[str, object]:
+    """Project an :class:`AgentMessage` into a JSON-stable dict.
+
+    The SDK dataclass may grow fields across patch releases — pinning the
+    wire shape here means the SPA does not silently break on additions.
+    """
+    return {
+        "id": msg.id,  # type: ignore[attr-defined]
+        "workspace_id": msg.workspace_id,  # type: ignore[attr-defined]
+        "sender_id": msg.sender_id,  # type: ignore[attr-defined]
+        "recipient_id": msg.recipient_id,  # type: ignore[attr-defined]
+        "broadcast_capability": msg.broadcast_capability,  # type: ignore[attr-defined]
+        "content": msg.content,  # type: ignore[attr-defined]
+        "purpose": str(msg.purpose),  # type: ignore[attr-defined]
+        "thread_id": msg.thread_id,  # type: ignore[attr-defined]
+        "in_reply_to": msg.in_reply_to,  # type: ignore[attr-defined]
+        "expects_reply": msg.expects_reply,  # type: ignore[attr-defined]
+        "status": str(msg.status),  # type: ignore[attr-defined]
+        "created_at": msg.created_at.isoformat(),  # type: ignore[attr-defined]
+        "read_at": msg.read_at.isoformat() if msg.read_at else None,  # type: ignore[attr-defined]
+        "replied_at": (
+            msg.replied_at.isoformat() if msg.replied_at else None  # type: ignore[attr-defined]
+        ),
+        "is_broadcast": msg.is_broadcast,  # type: ignore[attr-defined]
+    }
+
+
+def _coerce_purpose(value: object) -> object:
+    """Map a JSON ``purpose`` string into the SDK enum, defaulting to QUESTION."""
+    from wisdom_layer.workspace.messages import MessagePurpose
+
+    raw = str(value or "").strip().lower() or "question"
+    try:
+        return MessagePurpose(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"invalid purpose: {raw}") from exc
+
+
+@app.post("/api/workspace/messages")
+async def send_message(body: dict[str, object]) -> dict[str, object]:
+    """Send a directed agent-to-agent message.
+
+    Body: ``{ sender_id, recipient_id, content, purpose?, expects_reply? }``.
+    """
+    workspace = await _require_workspace()
+    sender_id = str(body.get("sender_id", "") or "").strip()
+    recipient_id = str(body.get("recipient_id", "") or "").strip()
+    content = str(body.get("content", "") or "")
+    if not sender_id or not recipient_id or not content.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="sender_id, recipient_id, and non-empty content are required",
+        )
+    purpose = _coerce_purpose(body.get("purpose", "question"))
+    expects_reply = bool(body.get("expects_reply", True))
+    try:
+        message_id = await workspace.messages.send(  # type: ignore[attr-defined]
+            sender_id=sender_id,
+            recipient_id=recipient_id,
+            content=content,
+            purpose=purpose,
+            expects_reply=expects_reply,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"message_id": message_id}
+
+
+@app.post("/api/workspace/messages/broadcast")
+async def broadcast_message(body: dict[str, object]) -> dict[str, object]:
+    """Broadcast to every agent matching ``broadcast_capability``.
+
+    Body: ``{ sender_id, broadcast_capability, content, purpose? }``.
+    Use ``broadcast_capability="general"`` to reach the whole workspace.
+    """
+    workspace = await _require_workspace()
+    sender_id = str(body.get("sender_id", "") or "").strip()
+    capability = str(body.get("broadcast_capability", "") or "").strip()
+    content = str(body.get("content", "") or "")
+    if not sender_id or not capability or not content.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="sender_id, broadcast_capability, and non-empty content are required",
+        )
+    purpose = _coerce_purpose(body.get("purpose", "information"))
+    try:
+        message_id = await workspace.messages.broadcast(  # type: ignore[attr-defined]
+            sender_id=sender_id,
+            broadcast_capability=capability,
+            content=content,
+            purpose=purpose,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"message_id": message_id}
+
+
+@app.post("/api/workspace/messages/{message_id}/reply")
+async def reply_to_message(message_id: str, body: dict[str, object]) -> dict[str, object]:
+    """Reply on the same thread as ``message_id``."""
+    workspace = await _require_workspace()
+    sender_id = str(body.get("sender_id", "") or "").strip()
+    content = str(body.get("content", "") or "")
+    if not sender_id or not content.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="sender_id and non-empty content are required",
+        )
+    purpose = _coerce_purpose(body.get("purpose", "information"))
+    try:
+        reply_id = await workspace.messages.reply(  # type: ignore[attr-defined]
+            sender_id=sender_id,
+            in_reply_to=message_id,
+            content=content,
+            purpose=purpose,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"message_id": reply_id}
+
+
+@app.get("/api/workspace/agents/{agent_id}/inbox")
+async def get_inbox(
+    agent_id: str,
+    unread_only: bool = False,
+    include_broadcasts: bool = True,
+    limit: int = 100,
+) -> list[dict[str, object]]:
+    """Return the inbox for ``agent_id`` — directed + capability broadcasts."""
+    workspace = await _require_workspace()
+    # Look up the agent's capabilities so the bus can resolve broadcasts.
+    record = await workspace.directory.get(agent_id)  # type: ignore[attr-defined]
+    capabilities = list(record.capabilities) if record else ["general"]
+    rows = await workspace.messages.list_inbox(  # type: ignore[attr-defined]
+        recipient_id=agent_id,
+        recipient_capabilities=capabilities,
+        unread_only=unread_only,
+        include_broadcasts=include_broadcasts,
+        limit=limit,
+    )
+    return [_message_dict(m) for m in rows]
+
+
+@app.get("/api/workspace/threads/{thread_id}")
+async def get_thread(thread_id: str, limit: int = 200) -> list[dict[str, object]]:
+    """Return every message on a thread, oldest-first."""
+    workspace = await _require_workspace()
+    rows = await workspace.messages.list_thread(thread_id, limit=limit)  # type: ignore[attr-defined]
+    return [_message_dict(m) for m in rows]
+
+
+@app.post("/api/workspace/messages/{message_id}/read")
+async def mark_message_read(message_id: str, body: dict[str, object]) -> dict[str, object]:
+    """Mark ``message_id`` as read by ``agent_id``."""
+    workspace = await _require_workspace()
+    agent_id = str(body.get("agent_id", "") or "").strip()
+    if not agent_id:
+        raise HTTPException(status_code=422, detail="agent_id is required")
+    recorded = await workspace.messages.mark_read(  # type: ignore[attr-defined]
+        message_id=message_id, reader_agent_id=agent_id
+    )
+    return {"recorded": recorded}
 
 
 # --- Chat disclosure helpers -------------------------------------------------

@@ -53,6 +53,9 @@ def studio_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     import studio_api.store as store_module
 
     importlib.reload(store_module)
+    import studio_api.workspace as workspace_module
+
+    importlib.reload(workspace_module)
     import studio_api.sessions as sessions_module
 
     importlib.reload(sessions_module)

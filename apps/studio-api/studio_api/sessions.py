@@ -24,6 +24,7 @@ from studio_api.sdk_factory import build_agent
 from studio_api.sdk_mount import build_sdk_subapp
 from studio_api.settings import settings
 from studio_api.store import get_agent, load_studio_config, touch_agent
+from studio_api.workspace import workspace_manager
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +142,13 @@ class SessionManager:
                 license_key=license_key,
             )
             await agent.initialize()
+
+            # Bind into the multi-agent workspace if one is available.
+            # Silent no-op when the license tier doesn't support it — the
+            # single-agent flow keeps working untouched. The workspace
+            # caches its license-gate failure so this is cheap on every
+            # subsequent agent boot.
+            await workspace_manager.bind_agent(agent, detail)
 
             hub = WebSocketHub()
             hub.attach(agent)

@@ -1,0 +1,49 @@
+# OSV-Scanner / OpenSSF Scorecard ignore list.
+#
+# This file documents vulnerabilities that the Scorecard `Vulnerabilities`
+# check surfaces but which are not exploitable in the published artifact
+# (the `ghcr.io/rhatigan-agi/wisdom-studio` Docker image). Each entry is
+# reviewed and given a written rationale.
+#
+# What ships in the runtime image:
+#   - Python deps installed via `uv sync` from apps/studio-api/uv.lock
+#     (FastAPI + uvicorn + the wisdom-layer SDK + provider adapters)
+#   - The pre-built static SPA bundle (`apps/studio-web/dist/`) — plain
+#     HTML/CSS/JS. Vite, esbuild, and other build-time tooling are NOT
+#     shipped; they only run during `pnpm build` on a developer laptop
+#     or in CI.
+#
+# Update protocol:
+#   1. Run `docker run --rm -v $(pwd):/src ghcr.io/google/osv-scanner:latest --recursive /src`
+#      from the repo root.
+#   2. For each new advisory, classify: prod-reachable in the published
+#      Docker image? If yes, fix it (bump the floor in
+#      apps/studio-api/pyproject.toml or apps/studio-web/package.json
+#      and refresh the lockfile). If no (build-time tooling, dev-only,
+#      type-only), add an entry below with a clear rationale and review
+#      date.
+#   3. Re-run osv-scanner and confirm the count drops to documented-only.
+#
+# Format reference: https://google.github.io/osv-scanner/configuration/
+# Scorecard treats this file as authoritative for ignoring CVEs.
+
+# ---------------------------------------------------------------------------
+# studio-web — Build tooling (vite, esbuild)
+# ---------------------------------------------------------------------------
+# vite and esbuild are dev-time only. They run on developer laptops and
+# in the CI build container. The `pnpm build` output is plain static
+# HTML/CSS/JS (apps/studio-web/dist/) which is what the runtime image
+# serves via FastAPI's StaticFiles mount. The build tooling itself is
+# never imported, executed, or shipped at runtime.
+#
+# Migration plan: Vite 6 ships breaking changes for the React plugin
+# config; revisit on next frontend dep refresh. Until then these
+# advisories pose zero risk to deployed Studio instances.
+
+[[IgnoredVulns]]
+id = "GHSA-4w7w-66w2-5vf9"
+reason = "vite path traversal in optimized deps .map handling — Vite dev server only, not shipped. Studio's runtime image serves a pre-built static bundle; Vite is never invoked at runtime."
+
+[[IgnoredVulns]]
+id = "GHSA-67mh-4wv8-2f99"
+reason = "esbuild dev server CSRF — esbuild dev server only, not shipped. Studio's runtime image serves a pre-built static bundle produced by `pnpm build` in CI; esbuild is never invoked at runtime."

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Plus, Settings as SettingsIcon, BookOpen, Menu, X } from "lucide-react";
+import { Plus, Settings as SettingsIcon, BookOpen, Menu, X, Network } from "lucide-react";
 import clsx from "clsx";
 import { useStudio } from "../lib/store";
 import type { AgentSummary } from "../types/api";
@@ -94,6 +94,20 @@ export function Shell(): JSX.Element {
       </nav>
 
       <div className="border-t border-zinc-800 p-2">
+        <NavLink
+          to="/workspace"
+          className={({ isActive }) =>
+            clsx(
+              "flex min-h-[44px] items-center gap-2 rounded-md px-3 py-2 text-sm",
+              isActive
+                ? "bg-zinc-800 text-zinc-100"
+                : "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100",
+            )
+          }
+        >
+          <Network className="h-4 w-4" />
+          Workspace
+        </NavLink>
         {docsUrl && (
           <a
             href={docsUrl}
@@ -248,6 +262,20 @@ function DesktopNav(props: {
         )}
       </nav>
       <div className="border-t border-zinc-800 p-2">
+        <NavLink
+          to="/workspace"
+          className={({ isActive }) =>
+            clsx(
+              "flex items-center gap-2 rounded-md px-3 py-2 text-sm",
+              isActive
+                ? "bg-zinc-800 text-zinc-100"
+                : "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100",
+            )
+          }
+        >
+          <Network className="h-4 w-4" />
+          Workspace
+        </NavLink>
         {props.docsUrl && (
           <a
             href={props.docsUrl}

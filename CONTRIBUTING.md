@@ -90,3 +90,19 @@ sudo sysctl --system
 - Run validation before pushing (from the repo root):
   - `make typecheck lint test`
   - Smoke test: `make docker && make docker-run`, walk wizard → chat → confirm cognition events land in the sidebar.
+
+## Security
+
+Found a security issue? **Do not open a public issue or PR.** See
+[SECURITY.md](./SECURITY.md) for the disclosure policy and contacts
+(`security@wisdomlayer.ai`).
+
+If your PR touches dependencies, lockfiles, the Dockerfile, or any
+workflow under `.github/workflows/`, please:
+
+- Pin actions by commit SHA (not floating tag).
+- Refresh `apps/studio-api/uv.lock` (`uv lock`) and
+  `apps/studio-web/pnpm-lock.yaml` (`pnpm install`).
+- Run `docker run --rm -v "$(pwd):/src" ghcr.io/google/osv-scanner:latest --recursive /src`
+  and either fix any new advisories or document them in
+  `osv-scanner.toml` with a written rationale.

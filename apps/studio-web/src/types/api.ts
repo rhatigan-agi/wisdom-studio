@@ -171,3 +171,103 @@ export interface SessionState {
   token_cap: number | null;
   session_ttl_minutes: number | null;
 }
+
+// --- Multi-agent workspace (wisdom-layer 1.2.0+) ---------------------------
+// All workspace surfaces are license-gated; the SPA reads `available` first
+// and renders an upgrade CTA when false. The reason field discriminates the
+// failure modes so callers can branch without reading `message`.
+
+export type WorkspaceUnavailableReason =
+  | "license_missing"
+  | "enterprise_required"
+  | "init_failed"
+  | "uninitialized";
+
+export interface WorkspaceStatusUnavailable {
+  available: false;
+  reason: WorkspaceUnavailableReason;
+  feature: string | null;
+  required_tier: string | null;
+  upgrade_url: string | null;
+  message: string;
+}
+
+export interface WorkspaceStatusAvailable {
+  available: true;
+  workspace_id: string;
+  name: string;
+  agent_count: number;
+  initialized_at: string | null;
+}
+
+export type WorkspaceStatus = WorkspaceStatusAvailable | WorkspaceStatusUnavailable;
+
+export interface WorkspaceAgentRecord {
+  agent_id: string;
+  capabilities: string[];
+  registered_at: string;
+  last_seen_at: string | null;
+  past_success_rate: number;
+}
+
+export type SharedMemoryVisibility = "PRIVATE" | "TEAM" | "PUBLIC";
+
+export interface SharedMemory {
+  id: string;
+  workspace_id: string;
+  contributor_id: string;
+  source_memory_id: string;
+  visibility: string; // wire format: enum repr (e.g. "Visibility.TEAM")
+  content: string;
+  reason: string;
+  endorsement_count: number;
+  contention_count: number;
+  base_score: number;
+  team_score: number;
+  shared_at: string;
+  archived_at: string | null;
+}
+
+export interface TeamInsight {
+  id: string;
+  workspace_id: string;
+  content: string;
+  synthesis_prompt_hash: string;
+  contributor_count: number;
+  dream_cycle_id: string | null;
+  created_at: string;
+  archived_at: string | null;
+}
+
+export interface ProvenanceContribution {
+  shared_memory_id: string;
+  contributor_agent_id: string;
+  source_memory_id: string;
+  shared_content: string;
+  contribution_weight: number;
+}
+
+export interface TeamInsightProvenance {
+  team_insight: TeamInsight;
+  contributions: ProvenanceContribution[];
+}
+
+export type MessagePurpose = "question" | "information" | "coordination" | "handoff";
+
+export interface AgentMessage {
+  id: string;
+  workspace_id: string;
+  sender_id: string;
+  recipient_id: string | null;
+  broadcast_capability: string | null;
+  content: string;
+  purpose: string; // wire repr (e.g. "MessagePurpose.QUESTION")
+  thread_id: string;
+  in_reply_to: string | null;
+  expects_reply: boolean;
+  status: string;
+  created_at: string;
+  read_at: string | null;
+  replied_at: string | null;
+  is_broadcast: boolean;
+}

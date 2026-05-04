@@ -1,6 +1,7 @@
 import type {
   AgentCreate,
   AgentDetail,
+  AgentMessage,
   AgentSummary,
   ChatCompareMode,
   ChatCompareRequest,
@@ -10,10 +11,16 @@ import type {
   ChatResponse,
   ExampleSummary,
   MemoryEntry,
+  MessagePurpose,
   SessionState,
   SessionStateName,
+  SharedMemory,
   StudioConfig,
   StudioConfigUpdate,
+  TeamInsight,
+  TeamInsightProvenance,
+  WorkspaceAgentRecord,
+  WorkspaceStatus,
 } from "../types/api";
 import type {
   AuditReport,
@@ -266,4 +273,140 @@ export const api = {
   // sync with backend enforcement instead of trusting client wall-clock.
   getSessionState: (id: string): Promise<SessionState> =>
     request(`${studio}/agents/${id}/session`),
+
+  // --- Multi-agent workspace (1.2.0+) -------------------------------------
+  // Every workspace surface is license-gated. The SPA reads `workspaceStatus`
+  // first; if `available` is false it renders an upgrade CTA and skips the
+  // dependent fetches. Direct calls to gated routes return 403 with the
+  // structured `{ error: "workspace_unavailable", reason, upgrade_url }`
+  // body that the generic request() helper surfaces as an Error.
+  workspaceStatus: (): Promise<WorkspaceStatus> => request(`${studio}/workspace/status`),
+
+  workspaceAgents: (): Promise<WorkspaceAgentRecord[]> =>
+    request(`${studio}/workspace/agents`),
+
+  // Shared memory pool — the patent-defensible moat surface.
+  shareMemory: (
+    agentId: string,
+    memoryId: string,
+    body: { visibility?: "TEAM" | "PUBLIC"; reason?: string } = {},
+  ): Promise<{ shared_memory_id: string }> =>
+    request(`${studio}/agents/${agentId}/memory/${memoryId}/share`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  listSharedMemory: (opts: {
+    contributor_id?: string;
+    min_base_score?: number;
+    limit?: number;
+  } = {}): Promise<SharedMemory[]> => {
+    const params = new URLSearchParams();
+    if (opts.contributor_id) params.set("contributor_id", opts.contributor_id);
+    if (opts.min_base_score !== undefined)
+      params.set("min_base_score", String(opts.min_base_score));
+    if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    return request(`${studio}/workspace/shared-memory${qs ? `?${qs}` : ""}`);
+  },
+
+  endorseSharedMemory: (
+    sharedId: string,
+    agentId: string,
+  ): Promise<{ recorded: boolean }> =>
+    request(`${studio}/workspace/shared-memory/${sharedId}/endorse`, {
+      method: "POST",
+      body: JSON.stringify({ agent_id: agentId }),
+    }),
+
+  contestSharedMemory: (
+    sharedId: string,
+    agentId: string,
+    reason: string,
+  ): Promise<{ recorded: boolean }> =>
+    request(`${studio}/workspace/shared-memory/${sharedId}/contest`, {
+      method: "POST",
+      body: JSON.stringify({ agent_id: agentId, reason }),
+    }),
+
+  // Team insights + Team Dream (cross-agent reconsolidation).
+  listTeamInsights: (limit = 50): Promise<TeamInsight[]> =>
+    request(`${studio}/workspace/team-insights?limit=${limit}`),
+
+  runTeamDream: (
+    synthesizerAgentId: string,
+    minContributors = 2,
+  ): Promise<
+    | { synthesized: true; insight: TeamInsight }
+    | { synthesized: false; reason: string; min_contributors: number }
+  > =>
+    request(`${studio}/workspace/team-dream`, {
+      method: "POST",
+      body: JSON.stringify({
+        synthesizer_agent_id: synthesizerAgentId,
+        min_contributors: minContributors,
+      }),
+    }),
+
+  walkInsightProvenance: (insightId: string): Promise<TeamInsightProvenance> =>
+    request(`${studio}/workspace/team-insights/${insightId}/provenance`),
+
+  // Agent-to-agent messaging.
+  sendMessage: (body: {
+    sender_id: string;
+    recipient_id: string;
+    content: string;
+    purpose?: MessagePurpose;
+    expects_reply?: boolean;
+  }): Promise<{ message_id: string }> =>
+    request(`${studio}/workspace/messages`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  broadcastMessage: (body: {
+    sender_id: string;
+    broadcast_capability: string;
+    content: string;
+    purpose?: MessagePurpose;
+  }): Promise<{ message_id: string }> =>
+    request(`${studio}/workspace/messages/broadcast`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  replyToMessage: (
+    messageId: string,
+    body: { sender_id: string; content: string; purpose?: MessagePurpose },
+  ): Promise<{ message_id: string }> =>
+    request(`${studio}/workspace/messages/${messageId}/reply`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  getInbox: (
+    agentId: string,
+    opts: { unread_only?: boolean; include_broadcasts?: boolean; limit?: number } = {},
+  ): Promise<AgentMessage[]> => {
+    const params = new URLSearchParams();
+    if (opts.unread_only !== undefined)
+      params.set("unread_only", String(opts.unread_only));
+    if (opts.include_broadcasts !== undefined)
+      params.set("include_broadcasts", String(opts.include_broadcasts));
+    if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    return request(`${studio}/workspace/agents/${agentId}/inbox${qs ? `?${qs}` : ""}`);
+  },
+
+  getThread: (threadId: string, limit = 200): Promise<AgentMessage[]> =>
+    request(`${studio}/workspace/threads/${threadId}?limit=${limit}`),
+
+  markMessageRead: (
+    messageId: string,
+    agentId: string,
+  ): Promise<{ recorded: boolean }> =>
+    request(`${studio}/workspace/messages/${messageId}/read`, {
+      method: "POST",
+      body: JSON.stringify({ agent_id: agentId }),
+    }),
 };

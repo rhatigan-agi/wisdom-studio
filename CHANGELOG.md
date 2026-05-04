@@ -7,6 +7,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-05-03
+
+Multi-agent workspace surface for Wisdom Layer 1.2.0, plus
+procurement-grade security hardening. Studio is now ready for
+enterprise evaluation against the multi-agent SDK.
+
+### Added
+
+- **Multi-agent workspace surface (wisdom-layer 1.2.0).** New top-level
+  **Workspace** tab in the sidebar exposes the SDK's cross-agent
+  primitives — shared memory pool, agent-to-agent messaging, and Team
+  Dream synthesis — behind the SDK's Enterprise license gate. Without a
+  qualifying license the page renders an upgrade affordance; agents
+  themselves continue to function in single-agent mode.
+  - **Shared Memory Pool tab.** Lists every memory contributed to the
+    workspace pool with contributor agent, visibility, and per-memory
+    endorse / contest controls. Each agent page now carries a
+    "Share to workspace" button on every memory in the Memories pane;
+    one click promotes the private memory into the shared pool with a
+    `source_memory_id` back-pointer.
+  - **Team Insights tab.** Run a Team Dream from the SPA: pick any
+    agent in the workspace as the synthesizer, the SDK's
+    `team_synthesize` reads the entire shared pool, and the resulting
+    insight is written to the team-insights surface with full
+    provenance. **Walk Provenance** modal opens per-insight and shows
+    each contributing memory's source agent + opaque
+    `source_memory_id` — the underlying private memory body is *never*
+    returned, preserving the patent-defensible isolation boundary.
+  - **Messages tab.** Agent-to-agent messaging surface backed by the
+    SDK's `MessageBus`. Send direct messages or broadcast to all
+    workspace agents, view per-agent inbox, open a thread modal to see
+    the full reply chain, and mark messages read. Four message
+    purposes (`question`, `information`, `coordination`, `handoff`)
+    map to the SDK enum.
+  - Backend routes added under `/api/workspace/*`:
+    `GET /status`, `GET /agents`, `POST /agents/{id}/share`,
+    `GET /shared`, `POST /shared/{id}/endorse`,
+    `POST /shared/{id}/contest`, `GET /insights`,
+    `POST /insights/team-dream`, `GET /insights/{id}/provenance`,
+    `POST /messages`, `POST /messages/broadcast`,
+    `POST /messages/{id}/reply`, `GET /agents/{id}/inbox`,
+    `GET /threads/{id}`, `POST /messages/{id}/read`. All routes 403
+    cleanly when no license is present (`TierRestrictionError` mapped
+    to a structured body the SPA renders inline).
+  - **Three multi-agent demo seeds** under `examples/`:
+    `team_researcher.yaml`, `team_synthesizer.yaml`,
+    `team_critic.yaml` — a runnable Researcher → Synthesizer → Critic
+    team that exercises the full shared-pool / Team Dream / provenance
+    flow in five clicks. Picker entries surface in the agent wizard's
+    "Start from example" list.
+  - 25 new backend tests across `test_workspace_status.py`,
+    `test_workspace_pool.py`, `test_workspace_messages.py` exercise
+    the license gate, share/endorse/contest flow, Team Dream payload
+    shape, provenance walk, and message bus surface using
+    `FakeWorkspace` / `FakeMessageBus` stand-ins.
+- **`apps/studio-api`**: bumped `wisdom-layer` floor to
+  `>=1.2.0,<2.0.0` (now on PyPI). The `[tool.uv.sources]` local-path
+  pin used during pre-release development is removed.
+
+- **OpenSSF Scorecard hardening.** Procurement-grade security baseline
+  matching the upstream SDK:
+  - `.github/workflows/scorecard.yml` — weekly + push-triggered Scorecard
+    analysis, results published to the public Scorecard registry; badge
+    rendered in the README.
+  - `.github/workflows/codeql.yml` — Python + JavaScript static analysis
+    on every push/PR/weekly schedule; results land in the repo's Code
+    Scanning tab.
+  - SHA-pinned every GitHub Action across `ci.yml`, `release.yml`,
+    `scorecard.yml`, and `codeql.yml`. `permissions: read-all` set as the
+    repo-level default; `release.yml` opts in to `packages: write` and
+    `id-token: write` only on the publish job.
+  - `.github/dependabot.yml` — weekly updates for GitHub Actions, Docker,
+    pip (`apps/studio-api`), and npm (`apps/studio-web`).
+  - `SECURITY.md` — supported versions, disclosure timeline, threat
+    model, in/out-of-scope matrix, contacts (`security@wisdomlayer.ai`,
+    `privacy@wisdomlayer.ai`, `governance@wisdomlayer.ai`,
+    `compliance@wisdomlayer.ai`).
+  - `osv-scanner.toml` — accepted-advisory list with written rationale
+    (currently: vite + esbuild dev-only, not shipped in the runtime
+    image).
+  - `Dockerfile` digest-pins `python:3.12-slim`, `node:20-alpine`, and
+    pulls `uv` from a digest-pinned `ghcr.io/astral-sh/uv` image instead
+    of `pip install uv` (which Scorecard's Pinned-Dependencies check
+    flags as unpinned).
+  - README badges expanded to surface CI, CodeQL, OpenSSF Scorecard,
+    Ruff, security-policy, Python/Node versions, and activity signals.
+  - New "Security" section in README summarizes the hardening posture
+    for forkers and points to `SECURITY.md`.
+
+### Changed
+
+- `apps/studio-api`: bumped `litellm` floor to `>=1.83.14` to clear
+  GHSA-xqmj-j6mv-4862 (HIGH severity, CVSS 8.6). `uv.lock` regenerated.
+
 ## [0.8.0] - 2026-05-02
 
 ### Added
@@ -437,7 +531,8 @@ Initial public release. Apache-2.0.
   (per-user persistence) so a single image can serve many bind-mounted data
   directories without rebuilding.
 
-[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.7.1...v0.7.2

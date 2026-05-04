@@ -5,23 +5,28 @@ on:
     tags:
       - 'v*.*.*'
 
-permissions:
-  contents: read
-  packages: write
+# Repo-level: read-only by default. Each job below opts in to the
+# narrower scope it actually needs (publishing the GHCR image needs
+# `packages: write` and `id-token: write` for OIDC; nothing else does).
+permissions: read-all
 
 jobs:
   publish:
     name: build + push GHCR image (linux/amd64)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349  # v3.7.1
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  # v3.3.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -29,7 +34,7 @@ jobs:
 
       - name: Extract image metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81  # v5.5.1
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
@@ -38,7 +43,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25  # v5.4.0
         with:
           context: .
           platforms: linux/amd64

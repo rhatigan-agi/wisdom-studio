@@ -1,0 +1,53 @@
+# CodeQL — static security analysis on every push and PR.
+#
+# Studio ships both a Python FastAPI backend (apps/studio-api/) and a
+# TypeScript/React SPA (apps/studio-web/), so CodeQL runs against both
+# languages. Results land in the GitHub code-scanning tab (Security →
+# Code scanning) and feed the OpenSSF Scorecard SAST check.
+#
+# CodeQL runs free on public repositories.
+
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "30 6 * * 1"  # 06:30 UTC every Monday
+
+permissions: read-all
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["python", "javascript"]
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@6825d5659bf007b85a0866e2d0f434aacf50de94  # v3.27.5
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@6825d5659bf007b85a0866e2d0f434aacf50de94  # v3.27.5
+        with:
+          category: "/language:${{ matrix.language }}"
