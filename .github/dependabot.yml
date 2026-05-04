@@ -1,4 +1,13 @@
 version: 2
+
+# Dependabot config for Wisdom Studio.
+#
+# Strategy: bundle low-risk minor/patch bumps into one PR per ecosystem per week,
+# keep major-version bumps as individual PRs (they need manual review). This
+# keeps the PR queue short and the audit trail clean.
+#
+# Non-LTS Node majors are ignored — Studio targets the active Node LTS line.
+
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -6,6 +15,10 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "chore(actions)"
+    groups:
+      actions-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: "pip"
     directory: "/apps/studio-api"
@@ -14,6 +27,10 @@ updates:
     commit-message:
       prefix: "chore(deps-api)"
     open-pull-requests-limit: 5
+    groups:
+      pip-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: "npm"
     directory: "/apps/studio-web"
@@ -22,6 +39,10 @@ updates:
     commit-message:
       prefix: "chore(deps-web)"
     open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: "docker"
     directory: "/"
@@ -29,3 +50,11 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "chore(docker)"
+    ignore:
+      # Studio targets Node LTS only — odd-numbered Node majors are not LTS.
+      - dependency-name: "node"
+        versions: ["21.x", "23.x", "25.x", "27.x"]
+    groups:
+      docker-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

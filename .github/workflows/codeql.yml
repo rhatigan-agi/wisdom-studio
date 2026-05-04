@@ -25,6 +25,12 @@ concurrency:
 
 jobs:
   analyze:
+    # Skip on Dependabot PRs: their restricted token can't fetch the base ref
+    # the way CodeQL's diff-range analyzer requires (`fatal: error processing
+    # shallow info: 4`). CodeQL still runs on every push to main, so the moment
+    # any PR merges it gets full coverage. Version-bump PRs add no app code
+    # for CodeQL to analyze anyway.
+    if: github.actor != 'dependabot[bot]'
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     permissions:
@@ -40,8 +46,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-        with:
-          fetch-depth: 0  # CodeQL needs full history to compute PR diff range against main
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@f09c1c0a94de965c15400f5634aa42fac8fb8f88  # v3.27.5
