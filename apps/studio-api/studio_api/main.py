@@ -312,11 +312,7 @@ async def _require_workspace() -> object:
                 "feature": unavail.feature if unavail else None,
                 "required_tier": unavail.required_tier if unavail else None,
                 "upgrade_url": unavail.upgrade_url if unavail else None,
-                "message": (
-                    unavail.message
-                    if unavail
-                    else "Workspace is not initialized."
-                ),
+                "message": (unavail.message if unavail else "Workspace is not initialized."),
             },
         )
     return workspace

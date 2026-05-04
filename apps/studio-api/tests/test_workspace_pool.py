@@ -42,14 +42,14 @@ class _FakeSharedMemory:
     def __init__(
         self,
         *,
-        id: str,
+        memory_id: str,
         contributor_id: str,
         source_memory_id: str,
         content: str,
         reason: str = "",
         visibility: str = "TEAM",
     ) -> None:
-        self.id = id
+        self.id = memory_id
         self.workspace_id = "studio-default"
         self.contributor_id = contributor_id
         self.source_memory_id = source_memory_id
@@ -68,8 +68,8 @@ class _FakeSharedMemory:
 
 
 class _FakeTeamInsight:
-    def __init__(self, *, id: str, content: str, contributor_count: int) -> None:
-        self.id = id
+    def __init__(self, *, insight_id: str, content: str, contributor_count: int) -> None:
+        self.id = insight_id
         self.workspace_id = "studio-default"
         self.content = content
         self.synthesis_prompt_hash = "hash-abc"
@@ -143,9 +143,7 @@ class _FakePool:
         row.endorsement_count = len(seen)
         return True
 
-    async def contest(
-        self, shared_id: str, *, contesting_agent_id: str, reason: str
-    ) -> bool:
+    async def contest(self, shared_id: str, *, contesting_agent_id: str, reason: str) -> bool:
         row = self.shared.get(shared_id)
         if row is None:
             raise LookupError(shared_id)
@@ -176,9 +174,7 @@ class _FakeWorkspace:
     async def initialize(self) -> None: ...
     async def close(self) -> None: ...
 
-    async def register_agent(
-        self, agent: Any, *, capabilities: list[str] | None = None
-    ) -> None:
+    async def register_agent(self, agent: Any, *, capabilities: list[str] | None = None) -> None:
         self._agents[agent.agent_id] = _FakeAgentRecord(
             agent_id=agent.agent_id,
             capabilities=capabilities or [],
@@ -198,7 +194,9 @@ class _FakeWorkspace:
 
 
 @pytest.fixture
-def workspace_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[TestClient, _FakeWorkspace]]:
+def workspace_app(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[tuple[TestClient, _FakeWorkspace]]:
     """Boot Studio with a license + a successfully-initializing fake workspace."""
     monkeypatch.setenv("WISDOM_STUDIO_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("WISDOM_LAYER_LICENSE", "valid-enterprise-token")
@@ -260,10 +258,16 @@ def test_list_shared_memory_returns_empty_when_unavailable(studio_app: TestClien
 def test_list_shared_memory_returns_rows(workspace_app: tuple[TestClient, _FakeWorkspace]) -> None:
     client, fake = workspace_app
     fake.pool.shared["sh-1"] = _FakeSharedMemory(
-        id="sh-1", contributor_id="agent-a", source_memory_id="mem-1", content="hello world"
+        memory_id="sh-1",
+        contributor_id="agent-a",
+        source_memory_id="mem-1",
+        content="hello world",
     )
     fake.pool.shared["sh-2"] = _FakeSharedMemory(
-        id="sh-2", contributor_id="agent-b", source_memory_id="mem-2", content="another"
+        memory_id="sh-2",
+        contributor_id="agent-b",
+        source_memory_id="mem-2",
+        content="another",
     )
 
     response = client.get("/api/workspace/shared-memory")
@@ -294,7 +298,10 @@ def test_list_shared_memory_returns_rows(workspace_app: tuple[TestClient, _FakeW
 def test_endorse_requires_agent_id(workspace_app: tuple[TestClient, _FakeWorkspace]) -> None:
     client, fake = workspace_app
     fake.pool.shared["sh-1"] = _FakeSharedMemory(
-        id="sh-1", contributor_id="agent-a", source_memory_id="mem-1", content="x"
+        memory_id="sh-1",
+        contributor_id="agent-a",
+        source_memory_id="mem-1",
+        content="x",
     )
     response = client.post("/api/workspace/shared-memory/sh-1/endorse", json={})
     assert response.status_code == 422
@@ -306,14 +313,13 @@ def test_endorse_records_and_is_idempotent(
 ) -> None:
     client, fake = workspace_app
     fake.pool.shared["sh-1"] = _FakeSharedMemory(
-        id="sh-1", contributor_id="agent-a", source_memory_id="mem-1", content="x"
+        memory_id="sh-1",
+        contributor_id="agent-a",
+        source_memory_id="mem-1",
+        content="x",
     )
-    first = client.post(
-        "/api/workspace/shared-memory/sh-1/endorse", json={"agent_id": "agent-b"}
-    )
-    second = client.post(
-        "/api/workspace/shared-memory/sh-1/endorse", json={"agent_id": "agent-b"}
-    )
+    first = client.post("/api/workspace/shared-memory/sh-1/endorse", json={"agent_id": "agent-b"})
+    second = client.post("/api/workspace/shared-memory/sh-1/endorse", json={"agent_id": "agent-b"})
     assert first.status_code == 200 and first.json()["recorded"] is True
     assert second.status_code == 200 and second.json()["recorded"] is False
     assert fake.pool.shared["sh-1"].endorsement_count == 1
@@ -322,7 +328,10 @@ def test_endorse_records_and_is_idempotent(
 def test_contest_requires_reason(workspace_app: tuple[TestClient, _FakeWorkspace]) -> None:
     client, fake = workspace_app
     fake.pool.shared["sh-1"] = _FakeSharedMemory(
-        id="sh-1", contributor_id="agent-a", source_memory_id="mem-1", content="x"
+        memory_id="sh-1",
+        contributor_id="agent-a",
+        source_memory_id="mem-1",
+        content="x",
     )
     response = client.post(
         "/api/workspace/shared-memory/sh-1/contest", json={"agent_id": "agent-c"}
@@ -351,7 +360,7 @@ def test_walk_provenance_returns_chain_without_private_content(
     """
     client, fake = workspace_app
     insight = _FakeTeamInsight(
-        id="insight-1", content="Combined finding", contributor_count=2
+        insight_id="insight-1", content="Combined finding", contributor_count=2
     )
     fake.pool.insights["insight-1"] = insight
     fake.pool.contributions_by_insight["insight-1"] = [

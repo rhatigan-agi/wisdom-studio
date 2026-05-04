@@ -45,9 +45,7 @@ class _FakeDirectory:
         include_archived: bool = False,
     ) -> list[_FakeAgentRecord]:
         return [
-            r
-            for r in self._store.values()
-            if capability is None or capability in r.capabilities
+            r for r in self._store.values() if capability is None or capability in r.capabilities
         ]
 
     async def get(self, agent_id: str) -> _FakeAgentRecord | None:
@@ -108,7 +106,9 @@ def _patch_workspace_factory(builder: Any) -> Any:
 
 
 @pytest.fixture
-def studio_app_with_license(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+def studio_app_with_license(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[TestClient]:
     """Studio app booted with an env-supplied license key.
 
     The license value is an opaque sentinel — the real license validation is
@@ -255,9 +255,7 @@ def test_initialize_is_idempotent_across_repeated_calls(
     assert fake.initialize_calls == 1
 
 
-def test_agents_lists_registered_agents(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_agents_lists_registered_agents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """When agents are bound (simulated via direct register), directory list reflects them."""
     monkeypatch.setenv("WISDOM_STUDIO_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("WISDOM_LAYER_LICENSE", "valid-enterprise-token")

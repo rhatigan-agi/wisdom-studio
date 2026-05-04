@@ -42,7 +42,7 @@ class _FakeMessage:
     def __init__(
         self,
         *,
-        id: str,
+        message_id: str,
         sender_id: str,
         recipient_id: str | None,
         content: str,
@@ -52,14 +52,14 @@ class _FakeMessage:
         purpose: str = "question",
         expects_reply: bool = True,
     ) -> None:
-        self.id = id
+        self.id = message_id
         self.workspace_id = "studio-default"
         self.sender_id = sender_id
         self.recipient_id = recipient_id
         self.broadcast_capability = broadcast_capability
         self.content = content
         self.purpose = purpose
-        self.thread_id = thread_id or id
+        self.thread_id = thread_id or message_id
         self.in_reply_to = in_reply_to
         self.expects_reply = expects_reply
         self.status = "pending"
@@ -93,7 +93,7 @@ class _FakeMessageBus:
     ) -> str:
         msg_id = self._next_id()
         self.messages[msg_id] = _FakeMessage(
-            id=msg_id,
+            message_id=msg_id,
             sender_id=sender_id,
             recipient_id=recipient_id,
             content=content,
@@ -113,7 +113,7 @@ class _FakeMessageBus:
     ) -> str:
         msg_id = self._next_id("bcast")
         self.messages[msg_id] = _FakeMessage(
-            id=msg_id,
+            message_id=msg_id,
             sender_id=sender_id,
             recipient_id=None,
             content=content,
@@ -137,7 +137,7 @@ class _FakeMessageBus:
             raise LookupError(in_reply_to)
         msg_id = self._next_id("reply")
         self.messages[msg_id] = _FakeMessage(
-            id=msg_id,
+            message_id=msg_id,
             sender_id=sender_id,
             recipient_id=original.sender_id,
             content=content,
@@ -159,9 +159,7 @@ class _FakeMessageBus:
     ) -> list[_FakeMessage]:
         rows: list[_FakeMessage] = []
         for m in self.messages.values():
-            if m.recipient_id == recipient_id:
-                rows.append(m)
-            elif (
+            if m.recipient_id == recipient_id or (
                 include_broadcasts
                 and m.broadcast_capability is not None
                 and m.broadcast_capability in recipient_capabilities
@@ -191,9 +189,7 @@ class _FakeWorkspace:
     async def initialize(self) -> None: ...
     async def close(self) -> None: ...
 
-    async def register_agent(
-        self, agent: Any, *, capabilities: list[str] | None = None
-    ) -> None:
+    async def register_agent(self, agent: Any, *, capabilities: list[str] | None = None) -> None:
         self._agents[agent.agent_id] = _FakeAgentRecord(
             agent_id=agent.agent_id,
             capabilities=capabilities or [],
@@ -377,11 +373,7 @@ def test_mark_read_records_once(workspace_app: tuple[TestClient, _FakeWorkspace]
         },
     )
     msg_id = send_resp.json()["message_id"]
-    first = client.post(
-        f"/api/workspace/messages/{msg_id}/read", json={"agent_id": "agent-b"}
-    )
-    second = client.post(
-        f"/api/workspace/messages/{msg_id}/read", json={"agent_id": "agent-b"}
-    )
+    first = client.post(f"/api/workspace/messages/{msg_id}/read", json={"agent_id": "agent-b"})
+    second = client.post(f"/api/workspace/messages/{msg_id}/read", json={"agent_id": "agent-b"})
     assert first.status_code == 200 and first.json()["recorded"] is True
     assert second.status_code == 200 and second.json()["recorded"] is False

@@ -198,9 +198,7 @@ def test_repo_root_anchor_works_when_package_is_flattened(tmp_path: Path) -> Non
     assert (settings_module._REPO_ROOT / "examples").is_dir()
 
 
-def test_seed_path_absolute_passes_through(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_seed_path_absolute_passes_through(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """An absolute ``seed_path`` is returned untouched — the operator's call wins."""
     explicit = tmp_path / "ops" / "custom-seed.json"
     monkeypatch.setenv("WISDOM_STUDIO_SEED_PATH", str(explicit))
@@ -527,9 +525,7 @@ def test_env_keys_do_not_leak_into_config_response(
         assert body["license_key"] is None
 
 
-def test_env_keys_not_persisted_to_disk(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_env_keys_not_persisted_to_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Booting with env keys must NOT write studio.json.
 
     The persistence file is reserved for user-set values from the wizard. An
@@ -594,18 +590,14 @@ def test_env_provider_key_is_used_when_persisted_absent(
         assert resolved == "sk-from-env"
 
 
-def test_no_env_keys_keeps_uninitialized(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_no_env_keys_keeps_uninitialized(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Sanity: absence of env keys leaves ``initialized=false`` (FirstRun shows)."""
     with _boot_studio(tmp_path, monkeypatch) as client:
         body = client.get("/api/config").json()
         assert body["initialized"] is False
 
 
-def test_blank_env_key_treated_as_unset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_blank_env_key_treated_as_unset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``ANTHROPIC_API_KEY=`` (empty) must not flip ``initialized`` to true.
 
     Forkers commonly pass through the env var unconditionally
@@ -713,9 +705,7 @@ def test_docs_url_unset_returns_null(tmp_path: Path, monkeypatch: pytest.MonkeyP
 # --- 2.8 Ephemeral mode (v0.7) -----------------------------------------------
 
 
-def test_ephemeral_mode_exposed_in_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_ephemeral_mode_exposed_in_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     with _boot_studio(
         tmp_path,
         monkeypatch,
@@ -848,9 +838,7 @@ def test_token_cap_unset_returns_null(tmp_path: Path, monkeypatch: pytest.Monkey
 # --- 2.10 Session-end CTA (v0.7) ---------------------------------------------
 
 
-def test_session_end_cta_round_trips(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_session_end_cta_round_trips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     with _boot_studio(
         tmp_path,
         monkeypatch,
@@ -1062,9 +1050,7 @@ def test_chat_returns_410_when_token_cap_reached(
         session = asyncio.run(sessions_module.session_manager.get_or_create("probe"))
         asyncio.run(session.mark_started())
 
-        response = client.post(
-            "/api/agents/probe/chat", json={"message": "hi", "capture": False}
-        )
+        response = client.post("/api/agents/probe/chat", json={"message": "hi", "capture": False})
         assert response.status_code == 410
         body = response.json()
         assert body["error"] == "token_cap_reached"
@@ -1073,9 +1059,7 @@ def test_chat_returns_410_when_token_cap_reached(
         assert body["token_cap"] == 100
 
 
-def test_chat_returns_410_when_ttl_expired(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_chat_returns_410_when_ttl_expired(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Same defense-in-depth gate, TTL branch."""
     from datetime import UTC, datetime, timedelta
 
@@ -1127,9 +1111,7 @@ def test_chat_returns_410_when_ttl_expired(
         session.started_at = datetime.now(UTC) - timedelta(minutes=10)
         session.expires_at = datetime.now(UTC) - timedelta(minutes=5)
 
-        response = client.post(
-            "/api/agents/probe/chat", json={"message": "hi", "capture": False}
-        )
+        response = client.post("/api/agents/probe/chat", json={"message": "hi", "capture": False})
         assert response.status_code == 410
         body = response.json()
         assert body["error"] == "session_ended"

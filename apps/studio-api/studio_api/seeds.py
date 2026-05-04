@@ -59,9 +59,7 @@ class SeedSpec(BaseModel):
     memories: list[SeedMemory] = Field(default_factory=list)
     # Optional clickable chips rendered on the agent's empty chat. Same shape
     # as AgentCreate.conversation_starters so the manifest round-trips cleanly.
-    conversation_starters: list[ConversationStarter] = Field(
-        default_factory=list, max_length=5
-    )
+    conversation_starters: list[ConversationStarter] = Field(default_factory=list, max_length=5)
 
     llm_provider: LLMProvider = "anthropic"
     llm_model: str | None = None

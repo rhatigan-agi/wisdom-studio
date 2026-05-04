@@ -94,9 +94,7 @@ class AgentSession:
             self.state = "session_ended"
             return self.to_state()
         if settings.token_cap_per_session is not None and self.started_at is not None:
-            self.tokens_used = await session_token_total(
-                self.agent, self.started_at.isoformat()
-            )
+            self.tokens_used = await session_token_total(self.agent, self.started_at.isoformat())
             if self.tokens_used >= settings.token_cap_per_session:
                 self.state = "token_cap_reached"
         return self.to_state()

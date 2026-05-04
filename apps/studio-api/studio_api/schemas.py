@@ -124,9 +124,7 @@ class AgentCreate(BaseModel):
 
     # Optional clickable chips rendered on an empty chat. Solves blank-page
     # paralysis in conference, internal-team, and marketing-embed contexts.
-    conversation_starters: list[ConversationStarter] = Field(
-        default_factory=list, max_length=5
-    )
+    conversation_starters: list[ConversationStarter] = Field(default_factory=list, max_length=5)
 
 
 # --- Examples ----------------------------------------------------------------

@@ -192,9 +192,7 @@ class WorkspaceManager:
             "workspace_id": _WORKSPACE_ID,
             "name": _WORKSPACE_NAME,
             "agent_count": len(self._registered_agents),
-            "initialized_at": (
-                self._initialized_at.isoformat() if self._initialized_at else None
-            ),
+            "initialized_at": (self._initialized_at.isoformat() if self._initialized_at else None),
         }
 
     async def list_agents(self) -> list[dict[str, Any]]:
