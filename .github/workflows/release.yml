@@ -69,9 +69,9 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           # Pull the section between "## [VERSION]" and the next "## [" header.
           # Write to a file (not a step output) so the next step can pass it
-          # via --notes-file — using --notes "${{ outputs.notes }}" inlines
-          # the text into a bash heredoc and any backticks/parens in the
-          # CHANGELOG break shell parsing.
+          # via --notes-file. Inlining the text via --notes interpolation
+          # exposes any backticks or parens in the CHANGELOG to bash heredoc
+          # parsing, which broke the v0.9.2 release publish step.
           awk -v v="$VERSION" '
             $0 ~ "^## \\[" v "\\]" { flag = 1; next }
             /^## \[/ { flag = 0 }
