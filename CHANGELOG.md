@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-05-06
+
+Maintenance release: pull in Wisdom Layer SDK 1.2.1.
+
+### Changed
+
+- **`apps/studio-api`**: bumped `wisdom-layer` floor from `>=1.2.0` to
+  `>=1.2.1`. The previous floor already auto-resolved to 1.2.1 on a fresh
+  install, but pinning the floor explicitly lets forks lock against the
+  validated SDK version (and unblocks any downstream that needs Python 3.14
+  wheels — 1.2.1 is the first SDK release with `cp314` wheels).
+
+### Inherited from wisdom-layer 1.2.1
+
+These ride along on the SDK bump — Studio surfaces them automatically and
+no Studio code changes were required:
+
+- `agent.directives.update(directive_id, new_text, ...)` and
+  `agent.directives.history(directive_id)` — directive text-edit history
+  with revisions preserved in `directive_revisions`. Surfaces through the
+  per-agent SDK dashboard at `/agents/{id}/dashboard/`.
+- `directive.text_updated` event — fires on every successful directive
+  edit and flows through Studio's cognition WebSocket bridge unchanged.
+- Real telemetry counters: `fact_count` and `dream_cycles_count` in the
+  daily snapshot are now populated from the backend instead of hardcoded
+  `0`.
+- Migration `0025_directive_revisions.sql` — runs on Studio's SQLite /
+  Postgres data dir via the SDK's startup migration path.
+- License log message wording cleanup (`"License validated via API"`
+  without the misleading `"(legacy key)"` suffix on current-format keys).
+
+See [wisdom-layer CHANGELOG][wl-changelog] for the full v1.2.1 notes.
+
+[wl-changelog]: https://github.com/rhatigan-agi/wisdom-layer/blob/main/CHANGELOG.md#121----2026-05-05
+
 ## [0.9.2] - 2026-05-04
 
 Two small UI fixes for the multi-agent demo flow.
@@ -582,7 +617,8 @@ Initial public release. Apache-2.0.
   (per-user persistence) so a single image can serve many bind-mounted data
   directories without rebuilding.
 
-[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.8.0...v0.9.0

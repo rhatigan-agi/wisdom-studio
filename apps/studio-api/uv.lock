@@ -3058,7 +3058,7 @@ wheels = [
 
 [[package]]
 name = "wisdom-layer"
-version = "1.2.0"
+version = "1.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -3068,23 +3068,27 @@ dependencies = [
     { name = "pyjwt", extra = ["crypto"] },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c9/22/c011728a75364867e72d8722d214821c703061081e35d2ef053253d7ec97/wisdom_layer-1.2.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:d22f3871ac5543a492f497413c2a2243b8f86051590174eb09c22890c2faf000", size = 1786598, upload-time = "2026-05-03T22:50:46.138Z" },
-    { url = "https://files.pythonhosted.org/packages/52/d8/56a331c6e7b04483f9fb6412a600b8e23088a4b958252429651bdc41a1f5/wisdom_layer-1.2.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:6a4da80cb9b3747a6692a8c28dfb16c33311df30931990ca0c17896687111363", size = 3936726, upload-time = "2026-05-03T22:50:48.404Z" },
-    { url = "https://files.pythonhosted.org/packages/9f/84/6ade4bba7751bad63aac9e055099f89da9016308889b408a9d3f81429802/wisdom_layer-1.2.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9065a61a1f525eacecfc71d600d7dfcc167834fd710002881244b2920165b020", size = 3924412, upload-time = "2026-05-03T22:50:50.277Z" },
-    { url = "https://files.pythonhosted.org/packages/04/41/655ad88aa428684dc7664148999a1b8352ac422e0628e964a5e21570264d/wisdom_layer-1.2.0-cp311-cp311-win_amd64.whl", hash = "sha256:69d26d2ce3b503a9bb7f5cfb56226faa80da172adaebb5b529850bdc82930069", size = 1793838, upload-time = "2026-05-03T22:50:52.156Z" },
-    { url = "https://files.pythonhosted.org/packages/24/67/e739e982d7c9b63a35fa90622b245cd36568fb84e9ff249ddb695e816109/wisdom_layer-1.2.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:78cd26e502a8a1ea3691fc397d573b094685bad0e12cdd3a29bc78cbd3a0e529", size = 1783863, upload-time = "2026-05-03T22:50:54.247Z" },
-    { url = "https://files.pythonhosted.org/packages/08/d2/40fc3652e85017dddf307f56d408a4cec3f0856311ef896a80a4e09adfbb/wisdom_layer-1.2.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:aa69a76a5bf8a050c5d5d29f74f711eaf36b1a19015e1eb47e848fdc241f9db9", size = 4124370, upload-time = "2026-05-03T22:50:56.019Z" },
-    { url = "https://files.pythonhosted.org/packages/d0/2b/a08a233208d568556ca09feeafc2bedda30bfac973650da2f3444fbebed8/wisdom_layer-1.2.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:541e5e8dfec99b0db41e120e1824fff1ca75f4d8e7bd82559d808cf11b69351a", size = 4153832, upload-time = "2026-05-03T22:50:57.738Z" },
-    { url = "https://files.pythonhosted.org/packages/82/eb/08ce89df4e5edf08dc8d755b4d87bdc7641f55c90f5c7e26814c0c5123cc/wisdom_layer-1.2.0-cp312-cp312-win_amd64.whl", hash = "sha256:3e233f5ea7d5d99711c3ffc9d8eb82791dc38e858aaabf5c23d56c9a36a64899", size = 1790632, upload-time = "2026-05-03T22:50:59.907Z" },
-    { url = "https://files.pythonhosted.org/packages/6e/ad/14bf01061314cbaa5da272247cac78ef603f6200ae55e7c35d64deb4c965/wisdom_layer-1.2.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:c08f6ad64ff9f88f982459277b48db979dab7f0ecaaba90fe8aa4183e5db5844", size = 1775938, upload-time = "2026-05-03T22:51:02.328Z" },
-    { url = "https://files.pythonhosted.org/packages/33/dc/c67ce272aae9a93b30d50728aff3158c6e34b2b6d8068a5818c06bd3e3be/wisdom_layer-1.2.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:101f9cbfa871f8d003354a81fee2c76dbd262c8dbf472fab15d26c45489e5eab", size = 4006493, upload-time = "2026-05-03T22:51:04.152Z" },
-    { url = "https://files.pythonhosted.org/packages/27/20/973c481b202e63cbeab98f37bea14ff130c24a1328df99395671d274bd77/wisdom_layer-1.2.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ee8126d1ee9504c609f864aebb98ba10ea0316460d8a10d0cccbf0c926668c1d", size = 4029453, upload-time = "2026-05-03T22:51:06.099Z" },
-    { url = "https://files.pythonhosted.org/packages/39/94/feab45be209812701011ca658603912a9b92fa0f892a44c29adeeca0511c/wisdom_layer-1.2.0-cp313-cp313-win_amd64.whl", hash = "sha256:3bc9a4e916a5cee52ddd607d5bfa54827fb1f4377c5cdaf2ae87c82573613280", size = 1782426, upload-time = "2026-05-03T22:51:07.962Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/dd/eff26a415ce70f024034e6432887fd7f55ada5f8e8cd6b2bb92384fc262f/wisdom_layer-1.2.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:6c7c5230b92d14f352ec9f3389ec9f38e188fe24efa317caed0892c5b9d838b0", size = 1792911, upload-time = "2026-05-06T02:00:17.05Z" },
+    { url = "https://files.pythonhosted.org/packages/54/9c/1d89dd2ba333adec560fa9cab823d449cb7be510644d20869a0db9ee7399/wisdom_layer-1.2.1-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:d1a40d8dc5394f4cb14e56dcde049f3388ba326c3f0e37774e580793d09de5f4", size = 4030117, upload-time = "2026-05-06T02:00:19.352Z" },
+    { url = "https://files.pythonhosted.org/packages/f4/98/7156528e830c50a03a01b7677a426146de57e3d22caf137ea849ea1a24b5/wisdom_layer-1.2.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:699a27e09cac85f2bf0fec2239f1e0636d7a5faecd4ef9318aaafccd48440537", size = 4020602, upload-time = "2026-05-06T02:00:21.104Z" },
+    { url = "https://files.pythonhosted.org/packages/75/cf/6d40a9aaa05395eaec2e8e7581ac61ec72dbcc4eaa37f3b9c86d8e75701c/wisdom_layer-1.2.1-cp311-cp311-win_amd64.whl", hash = "sha256:be67626a983a2aa418d9ba895502acf054d28f6819ddc7eab52f1e86f6acee16", size = 1800023, upload-time = "2026-05-06T02:00:22.704Z" },
+    { url = "https://files.pythonhosted.org/packages/af/cd/811db654338b74c7cdaa5e0810fbd90b20b2e56e80db74cada74f0f9f15a/wisdom_layer-1.2.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:0da4fe2f24bd4f7098273459bb20964a14963f09f532f3583887b80c7d28b38d", size = 1790176, upload-time = "2026-05-06T02:00:24.26Z" },
+    { url = "https://files.pythonhosted.org/packages/a6/f9/22ab54b5827fbc19844e382665084406eb0bcd2e1a0f73491d47b8ef85af/wisdom_layer-1.2.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b391fcc37c70f38472865b6439b67e86266d9ab2e95d983d322fbcad49eb039c", size = 4213553, upload-time = "2026-05-06T02:00:26.315Z" },
+    { url = "https://files.pythonhosted.org/packages/21/53/1b4933473230dbd019715974bdbf44ec3498e345a08bb75ce6052461e7f4/wisdom_layer-1.2.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:acd60f12ef81d61cde05e7e889ac394112e7a01e081d30932d0083fb38c63fe5", size = 4244830, upload-time = "2026-05-06T02:00:28.342Z" },
+    { url = "https://files.pythonhosted.org/packages/65/a4/75eebaa1ad870855de90ba7d03b23cef31ebff1a6ede382d86db5528e1b7/wisdom_layer-1.2.1-cp312-cp312-win_amd64.whl", hash = "sha256:6f2bf2856b0b86847d50c6804b085546f9b66b9d0c2d7bf4b1c7364a7fb06072", size = 1796812, upload-time = "2026-05-06T02:00:30.276Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/d3/1432b8f46ed4c6ffed7935352d1e596f454170d74fcf2bb49a5a76735b6e/wisdom_layer-1.2.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:67d1b34be1c3c5057062b5d0c8c585ebeb83174b39e42e6f3718a63dfa11acce", size = 1782261, upload-time = "2026-05-06T02:00:31.971Z" },
+    { url = "https://files.pythonhosted.org/packages/79/e0/6343b4c7a1ce6d562da31df8db6d5734d50652475730ca6ac9232983512e/wisdom_layer-1.2.1-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:98ae0c12585d204ed60d78dca3dee53629f199066c4a22e2c48d62b6e351e04e", size = 4104558, upload-time = "2026-05-06T02:00:34.075Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/40/75576033075b46872fd544df3df2d041835006b9bedfbe07351f17735b34/wisdom_layer-1.2.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:725e4aa776cf917c67897323f0364c1298c84906d1ab9169d4ed9a0f98d8d3af", size = 4130874, upload-time = "2026-05-06T02:00:35.705Z" },
+    { url = "https://files.pythonhosted.org/packages/04/99/994c23bd62048e06580c1ceadd84eb1f0a87bb03882c61a4c8c458971b3e/wisdom_layer-1.2.1-cp313-cp313-win_amd64.whl", hash = "sha256:d271801dcb3f13d736969943ba7f90c288319250268d9a527ed680456cdaa581", size = 1788584, upload-time = "2026-05-06T02:00:38.113Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/e0/62d63dceca2a0efdec191ee24475055efe9316fd64663775fcfb3c09ac65/wisdom_layer-1.2.1-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:57a22d3c55049260cda7560c0e5f9297827986ea2cc99f789c248adc5c5e8bdc", size = 1784502, upload-time = "2026-05-06T02:00:39.905Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/98/03e4e2b5eb71ec3b90a22a08505b4b4bfce19b9f212ac2f5cf69b6c42fab/wisdom_layer-1.2.1-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:a419766bbab3fba2f82bdeeea462c36756dd63c2abbcef3996861a84a6da985f", size = 4105358, upload-time = "2026-05-06T02:00:41.723Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/e7/30595f84eeff4ef657f991cf9cb95c0cf1f9ff603b4ad3bbc76cfb4ab2f6/wisdom_layer-1.2.1-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:32acf8293d5d3b6a729f431d4d1f8631a50acc8ca840ffdc83535a4251bf0e6a", size = 4103056, upload-time = "2026-05-06T02:00:43.624Z" },
+    { url = "https://files.pythonhosted.org/packages/28/8d/dbf0486d8078f7298bff00b3e6fc5e1a0667c387d14ec304a2ea4708bf1a/wisdom_layer-1.2.1-cp314-cp314-win_amd64.whl", hash = "sha256:3348d185e1b5f7e094a2a604c15b29bd12e3551727cf964dd1069b3449718728", size = 1806845, upload-time = "2026-05-06T02:00:45.405Z" },
 ]
 
 [[package]]
 name = "wisdom-studio-api"
-version = "0.9.2"
+version = "0.9.3"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
@@ -3154,7 +3158,7 @@ requires-dist = [
     { name = "sentence-transformers", specifier = ">=3.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
     { name = "websockets", specifier = ">=13.0" },
-    { name = "wisdom-layer", specifier = ">=1.2.0,<2.0.0" },
+    { name = "wisdom-layer", specifier = ">=1.2.1,<2.0.0" },
 ]
 provides-extras = ["openai", "gemini", "ollama", "litellm", "all-adapters", "postgres", "dev"]
 
