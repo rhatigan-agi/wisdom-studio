@@ -153,14 +153,17 @@ function Field(props: {
   rightSlot?: React.ReactNode;
   children: React.ReactNode;
 }): JSX.Element {
+  // Wrapper is a <div>, not a <label>: a <label> forwards stray clicks to its
+  // first nested form control, which can fire unrelated buttons inside a
+  // multi-control field. See note in NewAgent.tsx for the original bug.
   return (
-    <label className="block">
+    <div className="block">
       <div className="mb-1 flex items-center justify-between gap-3">
         <span className="block text-sm text-zinc-300">{props.label}</span>
         {props.rightSlot}
       </div>
       {props.children}
       {props.help && <p className="mt-1 text-xs text-zinc-500">{props.help}</p>}
-    </label>
+    </div>
   );
 }

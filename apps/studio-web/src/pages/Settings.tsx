@@ -78,13 +78,16 @@ export function Settings(): JSX.Element {
         <fieldset className="space-y-4">
           <legend className="text-sm text-zinc-300">Provider API keys</legend>
           {PROVIDERS.map((provider) => {
-            const configured = Boolean(config?.provider_keys[provider]);
+            const persisted = Boolean(config?.provider_keys[provider]);
+            const fromEnv = config?.env_provider_keys?.includes(provider) ?? false;
+            const configured = persisted || fromEnv;
+            const help = persisted
+              ? "Already configured. Enter a new value to replace it."
+              : fromEnv
+                ? "Configured via environment variable. Saving a value here overrides it."
+                : undefined;
             return (
-              <Field
-                key={provider}
-                label={provider}
-                help={configured ? "Already configured. Enter a new value to replace it." : undefined}
-              >
+              <Field key={provider} label={provider} help={help}>
                 <input
                   type="password"
                   autoComplete="new-password"
@@ -128,14 +131,17 @@ function Field(props: {
   rightSlot?: React.ReactNode;
   children: React.ReactNode;
 }): JSX.Element {
+  // Wrapper is a <div>, not a <label>: a <label> forwards stray clicks to its
+  // first nested form control, which can fire unrelated buttons inside a
+  // multi-control field. See note in NewAgent.tsx for the original bug.
   return (
-    <label className="block">
+    <div className="block">
       <div className="mb-1 flex items-center justify-between gap-3">
         <span className="block text-sm capitalize text-zinc-300">{props.label}</span>
         {props.rightSlot}
       </div>
       {props.children}
       {props.help && <p className="mt-1 text-xs text-zinc-500">{props.help}</p>}
-    </label>
+    </div>
   );
 }

@@ -45,6 +45,7 @@ def _runtime_overlay() -> dict[str, object]:
     visitors should never be able to create/delete the seeded agent (CRUD).
     """
     return {
+        "env_provider_keys": sorted(settings.env_provider_keys.keys()),
         "banner_html": settings.banner_html,
         "session_ttl_minutes": settings.session_ttl_minutes,
         "docs_url": settings.docs_url,

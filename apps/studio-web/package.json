@@ -1,7 +1,7 @@
 {
   "name": "wisdom-studio-web",
   "private": true,
-  "version": "0.9.4",
+  "version": "0.9.5",
   "type": "module",
   "packageManager": "pnpm@10.25.0",
   "scripts": {

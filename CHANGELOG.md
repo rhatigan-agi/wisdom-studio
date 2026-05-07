@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-05-07
+
+UX polish release: three small bug fixes + one usability improvement on the
+Memories side-pane. No deployment-shape changes.
+
+### Fixed
+
+- **Conversation-starter chips no longer vanish when the helper text is
+  clicked.** The `Field` component in `NewAgent.tsx`, `Settings.tsx`, and
+  `FirstRun.tsx` wrapped its content in a `<label>`, which forwards stray
+  clicks to the first nested form control. Clicking the helper text below
+  the conversation-starter chips fired the first chip's X-remove button
+  and silently deleted it. Wrapper is now a `<div>`; visual is unchanged.
+- **Provider dropdown no longer hides env-supplied providers.** When an
+  API key was supplied via env var (e.g. `ANTHROPIC_API_KEY`), the
+  agent-create dropdown filtered it out as "not configured" until the
+  user round-tripped the Settings page. Studio now exposes the *names*
+  (not the values) of env-supplied providers via a new
+  `env_provider_keys: list[LLMProvider]` field on `GET /api/config`, and
+  the dropdown counts those as configured. Secret values still never
+  flow to the client (verified by an additional defense-in-depth assert
+  in `test_env_keys_do_not_leak_into_config_response`).
+
+### Added
+
+- **Memories pane now shows a recent-memories preview when the search
+  box is empty.** Previously the pane read as broken on first open
+  ("Type a query and press enter…" with no signal-of-life). On
+  session-live the pane now probes for the agent's most recent
+  memories, renders the top 5, and offers a "Show N more" toggle to
+  expand to the full preview set (capped at 20).
+- **Settings: env-supplied provider keys are now labeled.** When a
+  provider key is set via env var, the corresponding Settings field
+  renders "Configured via environment variable. Saving a value here
+  overrides it." instead of an empty placeholder.
+
 ## [0.9.4] - 2026-05-07
 
 Fork-friendliness pass: a documented auth seam, a deploy-behind-auth
@@ -659,7 +695,8 @@ Initial public release. Apache-2.0.
   (per-user persistence) so a single image can serve many bind-mounted data
   directories without rebuilding.
 
-[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.4...v0.9.5
 [0.9.4]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.1...v0.9.2

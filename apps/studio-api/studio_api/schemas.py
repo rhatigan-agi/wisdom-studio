@@ -65,6 +65,13 @@ class StudioConfig(BaseModel):
     initialized: bool = False
 
     # Runtime-only (read-only, set via WISDOM_STUDIO_* env vars).
+    # Names of providers whose API keys are supplied via env vars (e.g.
+    # ``ANTHROPIC_API_KEY``). Values are NEVER included — only the names —
+    # so the SPA can render env-supplied providers as "configured" in
+    # selectors without the wizard / Settings round-trip. The session
+    # manager still pulls actual keys directly from settings at agent-build
+    # time; this list is purely a UI hint.
+    env_provider_keys: list[LLMProvider] = Field(default_factory=list)
     banner_html: str | None = None
     session_ttl_minutes: int | None = None
     docs_url: str | None = None

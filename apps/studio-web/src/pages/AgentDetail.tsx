@@ -129,6 +129,12 @@ export function AgentDetail(): JSX.Element {
   const [memories, setMemories] = useState<MemorySearchHit[]>([]);
   const [memoriesLoading, setMemoriesLoading] = useState(false);
   const [memoriesError, setMemoriesError] = useState<string | null>(null);
+  // Recent-memories preview shown in the Memories pane when the search box
+  // is empty. Without this, the pane reads as broken on first open ("type a
+  // query…" with no signal-of-life). Loaded once when the session goes
+  // live; refreshed whenever the in-pane search returns to empty.
+  const [recentMemories, setRecentMemories] = useState<MemorySearchHit[]>([]);
+  const [recentExpanded, setRecentExpanded] = useState(false);
   const [tierError, setTierError] = useState<TierError | null>(null);
 
   // Mobile-only: side pane is hidden by default and revealed via the
@@ -195,8 +201,37 @@ export function AgentDetail(): JSX.Element {
     setMemories([]);
     setMemoryQuery("");
     setMemoriesError(null);
+    setRecentMemories([]);
+    setRecentExpanded(false);
     setDraft("");
   }, [agentId]);
+
+  // Recent-memories preview: probe once per agent when the WS confirms the
+  // SDK sub-app is live. Uses the same broad-seed pattern as useMemoryMap
+  // (semantic search with a generic anchor) and sorts client-side by
+  // recency. Failures are swallowed — empty state lands gracefully and the
+  // user can still type a query to search.
+  useEffect(() => {
+    if (!agentId || wsState !== "live") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await api.searchMemories(agentId, { query: "memory", limit: 20 });
+        if (cancelled) return;
+        const sorted = ([...result] as MemorySearchHit[]).sort((a, b) => {
+          const ta = a.created_at ? Date.parse(a.created_at) : 0;
+          const tb = b.created_at ? Date.parse(b.created_at) : 0;
+          return tb - ta;
+        });
+        setRecentMemories(sorted);
+      } catch {
+        // Tier-gated or transient failure — leave recents empty.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [agentId, wsState]);
 
   useEffect(() => {
     if (!agentId || !sessionGated) {
@@ -559,6 +594,9 @@ export function AgentDetail(): JSX.Element {
           loading={memoriesLoading}
           error={memoriesError}
           memories={memories}
+          recentMemories={recentMemories}
+          recentExpanded={recentExpanded}
+          onToggleRecentExpanded={() => setRecentExpanded((v) => !v)}
           onShared={refreshMemoryMap}
         />
       )}
@@ -1106,6 +1144,8 @@ function PaneTab(props: {
   );
 }
 
+const RECENT_PREVIEW_LIMIT = 5;
+
 function MemoryBrowser(props: {
   agentId: string;
   query: string;
@@ -1114,8 +1154,23 @@ function MemoryBrowser(props: {
   loading: boolean;
   error: string | null;
   memories: MemorySearchHit[];
+  recentMemories: MemorySearchHit[];
+  recentExpanded: boolean;
+  onToggleRecentExpanded: () => void;
   onShared?: () => void | Promise<void>;
 }): JSX.Element {
+  // When the search box is empty and there are no live results, show the
+  // most-recent memories as a preview. Without this the pane reads as
+  // broken on first open. The preview is collapsed to RECENT_PREVIEW_LIMIT
+  // by default; "Show more" expands to the full probe (capped at 20 by the
+  // loader in AgentDetail).
+  const showingRecents =
+    !props.query.trim() && props.memories.length === 0 && !props.loading && !props.error;
+  const recentVisible = props.recentExpanded
+    ? props.recentMemories
+    : props.recentMemories.slice(0, RECENT_PREVIEW_LIMIT);
+  const hiddenCount = props.recentMemories.length - RECENT_PREVIEW_LIMIT;
+
   return (
     <div className="flex h-full flex-col">
       <form onSubmit={props.onSearch} className="border-b border-zinc-800 px-3 py-2">
@@ -1133,23 +1188,56 @@ function MemoryBrowser(props: {
           </div>
         )}
         {props.loading && <div className="text-zinc-500">Searching…</div>}
-        {!props.loading && !props.error && props.memories.length === 0 && (
+        {!props.loading && !props.error && props.query.trim() && props.memories.length === 0 && (
+          <div className="text-zinc-600">No matches.</div>
+        )}
+        {showingRecents && props.recentMemories.length === 0 && (
           <div className="text-zinc-600">
-            {props.query.trim()
-              ? "No matches."
-              : "Type a query and press enter to search this agent's memories."}
+            No memories captured yet. Chat with this agent to seed memory, or type a query above
+            to search.
           </div>
         )}
-        <ul className="space-y-1">
-          {props.memories.map((mem, i) => (
-            <MemoryRow
-              key={mem.id ?? i}
-              agentId={props.agentId}
-              mem={mem}
-              onShared={props.onShared}
-            />
-          ))}
-        </ul>
+        {showingRecents && props.recentMemories.length > 0 && (
+          <>
+            <div className="mb-2 text-zinc-500">
+              Recent memories · top {Math.min(props.recentMemories.length, RECENT_PREVIEW_LIMIT)}
+            </div>
+            <ul className="space-y-1">
+              {recentVisible.map((mem, i) => (
+                <MemoryRow
+                  key={mem.id ?? i}
+                  agentId={props.agentId}
+                  mem={mem}
+                  onShared={props.onShared}
+                />
+              ))}
+            </ul>
+            {hiddenCount > 0 && (
+              <button
+                type="button"
+                onClick={props.onToggleRecentExpanded}
+                className="mt-2 flex w-full items-center justify-center gap-1 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 text-zinc-400 hover:border-emerald-700/40 hover:text-emerald-200"
+              >
+                {props.recentExpanded ? "Show less" : `Show ${hiddenCount} more`}
+                <ChevronDown
+                  className={`h-3 w-3 transition-transform ${props.recentExpanded ? "rotate-180" : ""}`}
+                />
+              </button>
+            )}
+          </>
+        )}
+        {!showingRecents && (
+          <ul className="space-y-1">
+            {props.memories.map((mem, i) => (
+              <MemoryRow
+                key={mem.id ?? i}
+                agentId={props.agentId}
+                mem={mem}
+                onShared={props.onShared}
+              />
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

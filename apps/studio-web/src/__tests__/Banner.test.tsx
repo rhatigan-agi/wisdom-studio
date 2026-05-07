@@ -10,6 +10,7 @@ function setConfig(patch: Partial<StudioConfig>): void {
       license_key: null,
       provider_keys: {},
       initialized: true,
+      env_provider_keys: [],
       banner_html: null,
       session_ttl_minutes: null,
       docs_url: null,

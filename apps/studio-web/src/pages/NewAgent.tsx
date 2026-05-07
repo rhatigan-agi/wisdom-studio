@@ -67,7 +67,11 @@ export function NewAgent(): JSX.Element {
 
   const configuredProviders: LLMProvider[] = PROVIDERS.filter((p) => {
     if (p === "ollama") return true;
-    return Boolean(config?.provider_keys[p]);
+    if (config?.provider_keys[p]) return true;
+    // Env-supplied keys count as "configured" — the dropdown would
+    // otherwise hide a provider whose key is set in the deployment env
+    // (e.g. ANTHROPIC_API_KEY) until the user round-trips Settings.
+    return config?.env_provider_keys?.includes(p) ?? false;
   });
 
   const onPickTemplate = async (slug: string, name: string): Promise<void> => {
@@ -469,14 +473,19 @@ function Field(props: {
   required?: boolean;
   children: React.ReactNode;
 }): JSX.Element {
+  // Wrapper is a <div>, not a <label>: a <label> forwards stray clicks to its
+  // first nested form control, so clicking the help text below the
+  // conversation-starter chips would fire the first chip's X-remove button
+  // and silently delete it. Visual + a11y are unchanged for single-input
+  // fields (the input is the next sibling of the label span).
   return (
-    <label className="block">
+    <div className="block">
       <span className="mb-1 block text-sm text-zinc-300">
         {props.label}
         {props.required && <span className="ml-1 text-emerald-400">*</span>}
       </span>
       {props.children}
       {props.help && <p className="mt-1 text-xs text-zinc-500">{props.help}</p>}
-    </label>
+    </div>
   );
 }

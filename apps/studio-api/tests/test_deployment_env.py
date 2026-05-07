@@ -510,8 +510,10 @@ def test_env_keys_do_not_leak_into_config_response(
 
     The response is consumed by the SPA and may be cached in browser memory.
     Persisted keys (entered through the wizard) live there by necessity, but
-    env keys belong to the operator's deployment surface and have no business
-    flowing to the client.
+    env-supplied secret values belong to the operator's deployment surface
+    and have no business flowing to the client. The provider *names* are
+    safe to expose (and are, via ``env_provider_keys``) so the SPA can
+    render the dropdown correctly.
     """
     with _boot_studio(
         tmp_path,
@@ -523,6 +525,42 @@ def test_env_keys_do_not_leak_into_config_response(
         body = client.get("/api/config").json()
         assert body["provider_keys"] == {}
         assert body["license_key"] is None
+        # Defense-in-depth: walk the full response and assert no
+        # secret value appears anywhere, including the new
+        # ``env_provider_keys`` list (which carries names only).
+        serialized = json.dumps(body)
+        assert "sk-ant-secret" not in serialized
+        assert "sk-openai-secret" not in serialized
+        assert "wl_pro_secret" not in serialized
+
+
+def test_env_provider_names_exposed_in_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``env_provider_keys`` lists the provider *names* whose values are env-set.
+
+    The SPA uses this list to mark providers as "configured" in the agent-create
+    dropdown without round-tripping the wizard / Settings page. Names are safe;
+    values stay server-side. Verified empirically that the actual key strings
+    do NOT appear in the response (see the leak test above).
+    """
+    with _boot_studio(
+        tmp_path,
+        monkeypatch,
+        ANTHROPIC_API_KEY="sk-ant-secret",
+        OPENAI_API_KEY="sk-openai-secret",
+    ) as client:
+        body = client.get("/api/config").json()
+        assert sorted(body["env_provider_keys"]) == ["anthropic", "openai"]
+
+
+def test_env_provider_keys_empty_when_no_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No env keys → ``env_provider_keys`` is an empty list, not missing."""
+    with _boot_studio(tmp_path, monkeypatch) as client:
+        body = client.get("/api/config").json()
+        assert body["env_provider_keys"] == []
 
 
 def test_env_keys_not_persisted_to_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

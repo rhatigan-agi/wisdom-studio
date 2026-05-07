@@ -24,6 +24,10 @@ export interface StudioConfig {
   provider_keys: Partial<Record<LLMProvider, string>>;
   initialized: boolean;
   // Runtime-only (sourced from server env on every load; not writable)
+  // Provider names whose keys are supplied via env vars (e.g.
+  // `ANTHROPIC_API_KEY`). Values are never included — only names — so the
+  // SPA can render env-supplied providers as "configured" in selectors.
+  env_provider_keys: LLMProvider[];
   banner_html: string | null;
   session_ttl_minutes: number | null;
   docs_url: string | null;
