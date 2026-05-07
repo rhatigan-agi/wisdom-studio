@@ -63,10 +63,106 @@ under its own license — see <https://github.com/rhatigan-agi/wisdom-layer>.
 Forks inherit Studio's license; check the SDK's terms separately for your
 deployment context.
 
+## Deploying behind auth
+
+Studio ships single-user/local — no login screen, every request resolves to
+`User(id="local")`. This is a deliberate scope decision: a reference UI
+should not pick a winner among Clerk / Auth0 / NextAuth / OIDC providers.
+There are two seams for forks that need real auth.
+
+### Option A — trust an upstream auth proxy
+
+The cheapest path. Put the app behind any reverse proxy that authenticates
+the user and writes the result into a header, then point Studio at the
+header:
+
+```bash
+WISDOM_STUDIO_TRUST_USER_HEADER=X-Authenticated-User
+# Optional. Defaults to loopback (127.0.0.0/8 + ::1/128) — same-host proxy.
+# Set this if your proxy lives on a different host.
+WISDOM_STUDIO_TRUSTED_PROXY_CIDRS=10.0.0.0/8
+```
+
+The dependency in `studio_api/auth.py:get_current_user` reads that header
+**only when the immediate peer is in the CIDR allowlist**. Untrusted peers
+are refused with `503 auth_proxy_misconfigured` — fail-closed, so a
+mis-deployed fork goes dark rather than open.
+
+Three short recipes that work with this seam:
+
+**Caddy basic-auth** (Caddyfile, 5 lines):
+
+```caddyfile
+studio.example.com {
+    basic_auth {
+        alice $2a$14$...   # bcrypt hash from `caddy hash-password`
+    }
+    header_up X-Authenticated-User {http.auth.user.id}
+    reverse_proxy localhost:3000
+}
+```
+
+**Cloudflare Access** (free tier, no Caddy needed): publish the app on a
+hostname routed through your Cloudflare zone, attach an Access policy, and
+forward `Cf-Access-Authenticated-User-Email` as the user id:
+
+```bash
+WISDOM_STUDIO_TRUST_USER_HEADER=Cf-Access-Authenticated-User-Email
+WISDOM_STUDIO_TRUSTED_PROXY_CIDRS=173.245.48.0/20,103.21.244.0/22  # CF egress
+```
+
+(Cloudflare publishes their full IP ranges at <https://www.cloudflare.com/ips/>.
+Pin the CIDR list so a request that bypasses the tunnel can't impersonate a CF edge.)
+
+**Tailscale serve** (zero-config personal use): expose the app on your
+tailnet only and let Tailscale identify the device. Tailscale serve does
+not write a header by default — combine with `tailscale serve --bg` and a
+small Caddy in front, or simply rely on tailnet ACLs and skip the header
+entirely (`WISDOM_STUDIO_TRUST_USER_HEADER` unset, `User(id="local")`).
+
+### Option B — override the dependency
+
+For JWT, OAuth, session-cookie, or any flow you want to own end-to-end:
+
+```python
+# your_fork/app.py
+from studio_api.auth import User, get_current_user
+from studio_api.main import app
+
+async def my_resolver(request) -> User:
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ")
+    claims = verify_jwt(token)            # your code
+    return User(id=claims["sub"])
+
+app.dependency_overrides[get_current_user] = my_resolver
+```
+
+Studio doesn't ship a JWT verifier on purpose — that surface area belongs
+in the fork, not in the reference UI.
+
+### Where to wire `Depends(get_current_user)`
+
+Studio's default routes don't enforce authorization on the user (the agent
+id is the access boundary). If your fork wants per-user routing, add the
+dependency to whichever endpoints care:
+
+```python
+from studio_api.auth import CurrentUser
+
+@app.get("/api/agents", response_model=list[AgentSummary])
+async def get_agents(user: CurrentUser) -> list[AgentSummary]:
+    return list_agents_for(user.id)   # filter by your user→agent table
+```
+
+`GET /api/whoami` is included as a working consumer of the seam — hit it
+to verify your auth wiring before threading the dependency into the rest
+of the surface.
+
 ## Out of scope for this repo
 
 - A SaaS hosted version of Studio.
 - A plugin marketplace or extension API.
 - Tools, integrations, or vertical UIs — those belong in your fork.
-- Multi-tenant accounts and per-user data isolation — by design; if you
-  need them, fork and add your own auth/persistence layer.
+- Multi-tenant accounts and per-user data isolation — by design; the auth
+  seam above gets you the *identity*; partitioning sessions, agents, and
+  shared memory by `user.id` is your fork's job.

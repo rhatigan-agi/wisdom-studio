@@ -29,6 +29,10 @@ permissions: read-all
 jobs:
   analysis:
     name: Scorecard analysis
+    # Forks should not submit their in-progress repo to the public OSSF
+    # Scorecard registry on every push to main. The forker can lift this
+    # guard once they're ready to publish their own scorecard.
+    if: github.repository == 'rhatigan-agi/wisdom-studio'
     runs-on: ubuntu-latest
     permissions:
       security-events: write

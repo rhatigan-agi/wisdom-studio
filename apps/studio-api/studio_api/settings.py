@@ -142,6 +142,23 @@ class StudioSettings(BaseSettings):
     session_end_cta_href: str | None = Field(default=None)
     session_end_cta_label: str | None = Field(default=None)
 
+    # --- Auth seam (forker-tunable; default is single-user/local) ------------
+    #
+    # Studio's documented posture is single-user/local. The auth seam in
+    # ``studio_api.auth.get_current_user`` defaults to ``User(id="local")``
+    # for every request. Forks deploying behind an auth proxy can either
+    # override the dependency entirely (canonical FastAPI pattern) or set
+    # ``trust_user_header`` so the proxy-populated header is honored.
+    #
+    # The CIDR allowlist is the safety belt — without it, anyone who can
+    # reach the bind port can spoof the header and become any user. When
+    # ``trust_user_header`` is set and ``trusted_proxy_cidrs`` is unset, the
+    # default is loopback-only (``127.0.0.0/8`` + ``::1/128``) — same-host
+    # proxy is the most common shape (Caddy / nginx in front of the app).
+    # Operators with a separate proxy host MUST set the CIDR explicitly.
+    trust_user_header: str | None = Field(default=None)
+    trusted_proxy_cidrs: str | None = Field(default=None)
+
     # --- Provider credentials (env-only, never persisted) --------------------
     #
     # These honor the bare `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / etc. names
@@ -255,6 +272,24 @@ class StudioSettings(BaseSettings):
         if self.seed_path.is_absolute():
             return self.seed_path
         return _REPO_ROOT / self.seed_path
+
+    @property
+    def trusted_proxy_cidrs_list(self) -> tuple[str, ...]:
+        """Parse ``WISDOM_STUDIO_TRUSTED_PROXY_CIDRS`` into a tuple.
+
+        Comma-separated list (friendlier than the JSON-encoded list pydantic
+        would otherwise demand). When the env var is unset:
+
+        * Returns ``("127.0.0.0/8", "::1/128")`` if ``trust_user_header`` is
+          set — same-host proxy is the most common deployment.
+        * Returns ``()`` otherwise — header trust is off, no allowlist
+          needed.
+        """
+        if self.trusted_proxy_cidrs is None:
+            if self.trust_user_header:
+                return ("127.0.0.0/8", "::1/128")
+            return ()
+        return tuple(p.strip() for p in self.trusted_proxy_cidrs.split(",") if p.strip())
 
     @property
     def env_provider_keys(self) -> dict[LLMProvider, str]:

@@ -13,6 +13,13 @@ permissions: read-all
 jobs:
   publish:
     name: build + push GHCR image (linux/amd64)
+    # Forks should not auto-publish a container to *our* GHCR namespace on
+    # tag push. Even though the runtime token is scoped to the running repo
+    # (so cross-repo writes are physically rejected), the workflow still
+    # spends fork CI minutes on a build the forker did not opt into. This
+    # guard makes the job no-op on forks until they explicitly change the
+    # repository name.
+    if: github.repository == 'rhatigan-agi/wisdom-studio'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -56,6 +63,7 @@ jobs:
   github-release:
     name: publish GitHub Release with CHANGELOG notes
     needs: publish
+    if: github.repository == 'rhatigan-agi/wisdom-studio'
     runs-on: ubuntu-latest
     permissions:
       contents: write

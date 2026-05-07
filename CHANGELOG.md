@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-05-07
+
+Fork-friendliness pass: a documented auth seam, a deploy-behind-auth
+cookbook, and workflow guards so forks no longer auto-publish to upstream's
+GHCR namespace or OSSF Scorecard registry.
+
+### Added
+
+- **Auth seam (`studio_api.auth.get_current_user`).** A FastAPI dependency
+  that defaults to `User(id="local")` — Studio's documented single-user
+  posture. Forks now have one canonical place to plug in real identity:
+  - `WISDOM_STUDIO_TRUST_USER_HEADER` reads the authenticated identity from
+    an upstream-populated header (e.g. `X-Authenticated-User`,
+    `Cf-Access-Authenticated-User-Email`). The dependency honors the header
+    **only when the immediate peer is in `WISDOM_STUDIO_TRUSTED_PROXY_CIDRS`**
+    (default `127.0.0.0/8,::1/128` — same-host proxy). Untrusted peers are
+    refused with `503 auth_proxy_misconfigured`; trusted peers that omit the
+    header are refused with `401 missing_user_header`. Both are fail-closed
+    so a misconfigured deploy never silently demotes to anonymous.
+  - `app.dependency_overrides[get_current_user] = your_resolver` is the
+    canonical FastAPI seam for forks that want to own the identity flow
+    end-to-end (JWT, OAuth, session cookies). Studio doesn't ship a JWT
+    verifier on purpose — that surface belongs in the fork.
+- **`GET /api/whoami`** — a tiny route that returns `{"id": ...}` for the
+  current user. Wired through `Depends(get_current_user)` so the seam has a
+  live consumer (and forkers get a working pattern to copy).
+- **`FORKING.md` — "Deploying behind auth" cookbook.** Three short recipes
+  forks can paste verbatim: Caddy `basic_auth` (5 lines), Cloudflare Access
+  with `Cf-Access-Authenticated-User-Email`, and Tailscale serve (tailnet
+  ACL only, no header). Plus an end-to-end example for plugging the
+  dependency into existing routes.
+
+### Changed
+
+- **`.github/workflows/release.yml`** and **`.github/workflows/scorecard.yml`**
+  now no-op on forks via `if: github.repository == 'rhatigan-agi/wisdom-studio'`.
+  GitHub's `GITHUB_TOKEN` is already scoped to the running repo (so a fork
+  could not have written to upstream's GHCR namespace anyway), but the
+  guard saves fork CI minutes on a build the forker did not opt into and
+  prevents a fork's in-progress repo from being submitted to the public
+  OSSF Scorecard registry on every push to `main`.
+
 ## [0.9.3] - 2026-05-06
 
 Maintenance release: pull in Wisdom Layer SDK 1.2.1.
@@ -617,7 +659,8 @@ Initial public release. Apache-2.0.
   (per-user persistence) so a single image can serve many bind-mounted data
   directories without rebuilding.
 
-[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/rhatigan-agi/wisdom-studio/compare/v0.9.0...v0.9.1

@@ -21,6 +21,7 @@ from wisdom_layer.errors import TierRestrictionError
 from wisdom_layer.integration import respond_loop
 
 from studio_api import __version__
+from studio_api.auth import CurrentUser
 from studio_api.examples import list_examples, load_example
 from studio_api.schemas import (
     AgentCreate,
@@ -137,6 +138,20 @@ async def handle_tier_restriction(_request: Request, exc: TierRestrictionError) 
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "version": __version__}
+
+
+# --- Identity seam -----------------------------------------------------------
+#
+# Default deployment is single-user/local — every request resolves to
+# ``User(id="local")``. Forks that deploy behind auth wire up
+# ``WISDOM_STUDIO_TRUST_USER_HEADER`` (header trust) or override
+# ``get_current_user`` via ``app.dependency_overrides`` to swap in their own
+# resolver. See ``studio_api/auth.py`` and ``FORKING.md`` for the full story.
+
+
+@app.get("/api/whoami")
+async def whoami(user: CurrentUser) -> dict[str, str]:
+    return {"id": user.id}
 
 
 # --- Studio config -----------------------------------------------------------
